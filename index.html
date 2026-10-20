@@ -163,11 +163,32 @@
       <button id="btnStart" type="button" disabled>Resume</button>
       <button id="btnStop" type="button">Pause</button>
       <span class="status" id="status">status: connecting...</span>
+      <button id="btnLogin" type="button">Log in</button>
+      <span class="status" id="userLbl" style="color:var(--dim);font-weight:bold">user: none</span>
+      <select id="ddSubject" aria-label="Live subject" hidden><option value="">no live subject</option></select>
       <span class="grow"></span>
       <span class="drops" id="drops">drops: - | gaps: -</span>
     </div>
     <div class="diag" id="diag">diag: -</div>
   </div>
+
+  <!-- log in: same account as the MATLAB GUI and the phone app -->
+  <fieldset class="panel" id="loginPanel" hidden>
+    <legend>Log in (same account as the GUI / phone app)</legend>
+    <form id="loginForm" class="kv" autocomplete="on">
+      <label class="muted" for="fMail">email:</label>
+      <input class="field" id="fMail" type="email" autocomplete="username" required>
+      <label class="muted" for="fPw">password:</label>
+      <input class="field" id="fPw" type="password" autocomplete="current-password" required>
+      <span></span>
+      <span style="display:flex;gap:6px;flex-wrap:wrap">
+        <button type="submit">Sign in</button>
+        <button type="button" id="btnCancelLogin">Cancel</button>
+      </span>
+    </form>
+    <div id="loginMsg" class="muted" style="margin-top:6px;min-height:20px"></div>
+    <div class="muted" style="font-size:12px">Live data is private: staff see every subject, a subject sees only their own. No account? Ask a researcher.</div>
+  </fieldset>
 
   <!-- tabs -->
   <div class="tabs" role="tablist">
@@ -220,8 +241,8 @@
       </fieldset>
       <fieldset class="panel">
         <legend>Subject</legend>
-        <div class="phase" id="phase" style="color:var(--dim)">NO DATA</div>
-        <div class="sub" id="phaseSub">nobody is streaming right now</div>
+        <div class="phase" id="phase" style="color:var(--dim)">LOG IN</div>
+        <div class="sub" id="phaseSub">live data is private - log in with your GUI / app account</div>
       </fieldset>
     </div>
   </section>
@@ -299,7 +320,7 @@
 
 </div>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/mqtt/5.10.1/mqtt.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <script>
 (() => {
   const $ = id => document.getElementById(id);
@@ -340,7 +361,7 @@
     const t = new Date(), line = `[${pad(t.getHours())}:${pad(t.getMinutes())}:${pad(t.getSeconds())}] ${msg}\n`;
     $('log').textContent += line; $('log').scrollTop = 1e9;
   }
-  log('rig: EMG(3) + IMU(2) @ 1000 Hz, shown at 100 Hz - real data only');
+  log('rig: EMG(3) + IMU(2) @ 1000 Hz, shown at 100 Hz - real data only, private');
 
   /* ---------- tabs ---------- */
   const tabs = [...document.querySelectorAll('.tab')];
@@ -374,18 +395,21 @@
     catch (e) { $('fEmail').select(); log('copy blocked - select and copy manually'); }
   };
 
-  /* ---------- live signals ----------
-     Real data only: rows from the rig via MQTT (MATLAB gs_web_broadcast -> web_bridge.py -> broker).
-     No data -> empty plot + NO DATA. Nothing is ever simulated. */
-  const TOPIC = 'ahmedltaief/nidham/6600fdf3';           // must match web_bridge.py
-  const BROKER = 'wss://broker.hivemq.com:8884/mqtt';
-  const LIVE_TIMEOUT_MS = 3000;
+  /* ---------- live signals (private) ----------
+     Same accounts + database as the MATLAB GUI and the phone app (Supabase, see D:\PHD\cloud).
+     Signed-in staff see every live subject; a subject sees only their own.
+     Rows arrive on the private Realtime channel live:<ID> (MATLAB -> web_bridge.py -> Supabase).
+     Nothing is ever simulated: no sign-in or no stream -> empty plot. */
+  const SUPABASE_URL = 'https://YOUR-PROJECT.supabase.co';          // Project Settings -> API
+  const SUPABASE_ANON_KEY = 'YOUR-ANON-KEY';                         // anon / publishable key (public by design)
+  const LIVE_TIMEOUT_MS = 3000, SESSION_FRESH_MS = 15000, POLL_MS = 5000;
   const SUBJECT_RE = /^P\d{2,3}$/;
   const COLS = ['--c1', '--c2', '--c3', '--c4', '--c5'];
 
   const N = 600;                        // samples on screen (6 s at 100 Hz)
   let CH = [], buf = [], filled = 0, head = 0, rows = 0, bytes = 0, running = true;
-  let mode = 'off', lastLive = 0, bridge = 'offline', subject = '';
+  let mode = 'off', lastLive = 0, subject = '', watching = '', channel = null;
+  let user = null, role = '', liveList = [];
   let liveInfo = { drops: 0, gaps: 0, seq: 0, rig: '' };
   const valuesEl = $('values');
 
@@ -424,21 +448,58 @@
   }
   function advance() { head = (head + 1) % N; rows++; filled = Math.min(N, filled + 1); }
 
+  /* ---------- backend ---------- */
+  const configured = !SUPABASE_URL.includes('YOUR-PROJECT') && !SUPABASE_ANON_KEY.startsWith('YOUR-');
+  const sb = configured && window.supabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
+  if (!configured) log('backend not configured yet - fill SUPABASE_URL / SUPABASE_ANON_KEY');
+  else if (!sb) log('supabase library failed to load');
+
+  function placeholder() {
+    if (!sb) return 'BACKEND NOT CONFIGURED';
+    if (!user) return 'LOG IN TO SEE LIVE DATA';
+    return 'NO DATA - nobody is streaming';
+  }
+
+  function showUser() {
+    const l = $('userLbl');
+    l.textContent = user ? `user: ${user.email.split('@')[0]} (${role})` + (mode === 'live' ? ` | subject: ${subject}` : '') : 'user: none';
+    l.style.color = user ? 'var(--good)' : 'var(--dim)';
+    l.title = user ? user.email : 'not signed in';
+    $('btnLogin').textContent = user ? 'Log out' : 'Log in';
+    $('btnLogin').disabled = !sb;
+    $('ddSubject').hidden = !user;
+  }
+
   function showSubject() {
     const live = mode === 'live';
-    $('phase').textContent = live ? subject : 'NO DATA';
+    $('phase').textContent = live ? subject : (user ? 'NO DATA' : 'LOG IN');
     $('phase').style.color = live ? 'var(--good)' : 'var(--dim)';
     $('phaseSub').textContent = live ? `streaming now - packet ${liveInfo.seq}`
-      : bridge === 'idle' ? 'bridge online - nobody is streaming right now'
-      : 'nobody is streaming right now';
+      : !sb ? 'backend not configured'
+      : !user ? 'live data is private - log in with your GUI / app account'
+      : liveList.length ? 'pick a subject in the top bar' : 'nobody is streaming right now';
+  }
+
+  function setStatus() {
+    const s = $('status');
+    let txt, col;
+    if (mode === 'live')  { txt = `status: LIVE - subject ${subject}` + (running ? '' : ' (display paused)'); col = running ? 'var(--good)' : 'var(--warn)'; }
+    else if (!sb)         { txt = 'status: backend not configured'; col = 'var(--bad)'; }
+    else if (!user)       { txt = 'status: logged out - live data is private'; col = 'var(--dim)'; }
+    else if (watching)    { txt = `status: waiting for ${watching}...`; col = 'var(--warn)'; }
+    else                  { txt = 'status: logged in - no live stream'; col = 'var(--dim)'; }
+    $('plotTag').textContent = mode === 'live' ? 'LIVE - ' + subject : 'NO DATA';
+    $('plotTag').style.color = mode === 'live' ? 'var(--good)' : 'var(--dim)';
+    showUser();
+    if (s._txt === txt) return;
+    s._txt = txt; s.style.color = col; type(s, txt);
   }
 
   // ---- live rows: [t_ms, emg1..N, IMU1 acc xyz, gyro xyz, IMU2 acc xyz, gyro xyz]
   function onLive(msg, nbytes) {
-    if (!msg || msg.v !== 1 || !Array.isArray(msg.rows)) return;
+    if (!msg || msg.v !== 1 || !Array.isArray(msg.rows) || msg.subject !== watching) return;
     const ne = Number(msg.nemg);
-    if (!Number.isInteger(ne) || ne < 1 || ne > 12 || msg.rows.length > 200) return;
-    if (typeof msg.subject !== 'string' || !SUBJECT_RE.test(msg.subject)) return;   // no subject -> ignore
+    if (!Number.isInteger(ne) || ne < 1 || ne > 12 || msg.rows.length > 500) return;
     if (mode !== 'live' || CH.length !== ne + 2 || subject !== msg.subject) {
       mode = 'live'; subject = msg.subject; setChannels(ne);
       log(`LIVE: subject ${subject} on rig ${String(msg.rig).slice(0, 8)} (${ne} EMG + 2 IMU, shown at ${Number(msg.fs) || 100} Hz)`);
@@ -463,41 +524,77 @@
     setStatus(); showSubject();
   }
 
-  function setStatus() {
-    const s = $('status');
-    let txt, col;
-    if (mode === 'live')         { txt = `status: LIVE - subject ${subject}` + (running ? '' : ' (display paused)'); col = running ? 'var(--good)' : 'var(--warn)'; }
-    else if (bridge === 'idle')  { txt = 'status: bridge online - waiting for real data'; col = 'var(--warn)'; }
-    else                         { txt = 'status: rig offline - no data'; col = 'var(--dim)'; }
-    $('plotTag').textContent = mode === 'live' ? 'LIVE - ' + subject : 'NO DATA';
-    $('plotTag').style.color = mode === 'live' ? 'var(--good)' : 'var(--dim)';
-    if (s._txt === txt) return;
-    s._txt = txt; s.style.color = col; type(s, txt);
+  // ---- watch one subject's private channel
+  async function watch(sid) {
+    if (sid === watching) return;
+    if (channel) { await sb.removeChannel(channel); channel = null; }
+    watching = sid; goOffline(); setStatus();
+    if (!sid) return;
+    const { data } = await sb.auth.getSession();
+    sb.realtime.setAuth(data.session && data.session.access_token);
+    channel = sb.channel('live:' + sid, { config: { private: true } })
+      .on('broadcast', { event: 'rows' }, m => onLive(m.payload, JSON.stringify(m.payload).length))
+      .subscribe((st, err) => {
+        if (st === 'SUBSCRIBED') log(`watching live:${sid}`);
+        else if (st === 'CHANNEL_ERROR') log(`live:${sid} refused` + (err ? ': ' + err.message : ''));
+      });
   }
 
-  // ---- MQTT (public broker: treat every message as untrusted, validate shape)
-  function connectBroker() {
-    if (!window.mqtt) { log('mqtt library failed to load - no live data'); return; }
-    const cl = mqtt.connect(BROKER, {
-      clientId: 'web-' + Math.random().toString(16).slice(2, 10),
-      clean: true, reconnectPeriod: 5000, connectTimeout: 8000
-    });
-    cl.on('connect', () => { log('broker connected - waiting for real data'); cl.subscribe([TOPIC + '/live', TOPIC + '/status']); });
-    cl.on('offline', () => log('broker offline - retrying'));
-    cl.on('error', e => log('broker error: ' + (e && e.message)));
-    cl.on('message', (topic, payload) => {
-      if (payload.length > 20000) return;
-      let msg; try { msg = JSON.parse(new TextDecoder().decode(payload)); } catch (e) { return; }
-      if (topic.endsWith('/status')) {
-        const st = String(msg && msg.state);
-        if (['streaming', 'idle', 'offline'].includes(st) && st !== bridge) {
-          bridge = st; log('bridge: ' + st);
-          if (st !== 'streaming') goOffline(st); else setStatus();
-        }
-      } else onLive(msg, payload.length);
-    });
+  // ---- who is streaming right now (RLS: staff see all, a subject only their own)
+  async function pollSessions() {
+    if (!sb || !user) return;
+    const since = new Date(Date.now() - SESSION_FRESH_MS).toISOString();
+    const { data, error } = await sb.from('sessions').select('id,subject_id,rig,source,last_seen')
+      .is('ended_at', null).gt('last_seen', since).order('subject_id');
+    if (error) { log('sessions: ' + error.message); return; }
+    liveList = [...new Set(data.map(r => r.subject_id).filter(s => SUBJECT_RE.test(s)))];
+    const dd = $('ddSubject'), keep = watching;
+    dd.innerHTML = '<option value="">' + (liveList.length ? 'subject...' : 'no live subject') + '</option>' +
+      liveList.map(s => `<option value="${s}">${s} (live)</option>`).join('');
+    if (keep && !liveList.includes(keep)) dd.insertAdjacentHTML('beforeend', `<option value="${keep}">${keep}</option>`);
+    dd.value = keep;
+    if (!watching && liveList.length === 1) { dd.value = liveList[0]; watch(liveList[0]); }
+    showSubject();
   }
-  connectBroker();
+  $('ddSubject').onchange = e => watch(e.target.value);
+
+  // ---- sign in / out (same accounts as the GUI + phone app)
+  async function onAuth(session) {
+    user = session ? session.user : null; role = '';
+    if (user) {
+      const { data } = await sb.from('profiles').select('role').eq('id', user.id).maybeSingle();
+      role = (data && data.role) || 'subject';
+      log(`logged in: ${user.email} (${role})`);
+      $('loginPanel').hidden = true;
+      pollSessions();
+    } else {
+      await watch(''); liveList = [];
+    }
+    setStatus(); showSubject();
+  }
+
+  $('btnLogin').onclick = async () => {
+    if (user) { await sb.auth.signOut(); log('logged out'); return; }
+    $('loginPanel').hidden = !$('loginPanel').hidden;
+    if (!$('loginPanel').hidden) $('fMail').focus();
+  };
+  $('loginForm').onsubmit = async e => {
+    e.preventDefault();
+    const msg = $('loginMsg'); msg.style.color = 'var(--dim)'; msg.textContent = 'signing in...';
+    const { error } = await sb.auth.signInWithPassword({ email: $('fMail').value.trim(), password: $('fPw').value });
+    $('fPw').value = '';
+    if (error) { msg.style.color = 'var(--bad)'; msg.textContent = error.message; }
+    else msg.textContent = '';
+  };
+  $('btnCancelLogin').onclick = () => { $('loginPanel').hidden = true; };
+
+  if (sb) {
+    sb.auth.onAuthStateChange((ev, session) => {
+      if (ev === 'TOKEN_REFRESHED' && session) { sb.realtime.setAuth(session.access_token); return; }
+      if (ev === 'SIGNED_IN' || ev === 'SIGNED_OUT' || ev === 'INITIAL_SESSION') setTimeout(() => onAuth(session), 0);
+    });
+    setInterval(pollSessions, POLL_MS);
+  }
 
   // ---- drawing
   const cv = $('plot'), ctx = cv.getContext('2d');
@@ -534,7 +631,7 @@
     if (mode !== 'live') {
       ctx.fillStyle = css('--dim'); ctx.textAlign = 'center';
       ctx.font = 'bold 16px ' + css('--font');
-      ctx.fillText('NO DATA - waiting for the rig', W / 2, H / 2 + 5);
+      ctx.fillText(placeholder(), W / 2, H / 2 + 5);
       ctx.textAlign = 'start';
     }
   }
@@ -555,7 +652,7 @@
       $('drops').style.color = live && (liveInfo.drops || liveInfo.gaps) ? 'var(--bad)' : live ? 'var(--good)' : 'var(--dim)';
       $('diag').textContent = live
         ? `diag: subject ${subject} | bytes ${bytes} | rows ${rows} | rig ${liveInfo.rig} | packet ${liveInfo.seq}`
-        : `diag: no data | bridge ${bridge} | topic ${TOPIC}`;
+        : `diag: no data | ${user ? 'live subjects: ' + (liveList.join(', ') || 'none') : 'logged out'}`;
     }
     requestAnimationFrame(frame);
   }

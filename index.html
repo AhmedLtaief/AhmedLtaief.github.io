@@ -1,20 +1,484 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="hacker">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Hammouda</title>
+  <meta name="description" content="Sidi Ahmed Hammouda - electrical engineering student: AI, embedded systems, computer vision.">
   <style>
-    body { font-family: sans-serif; max-width: 700px; margin: 40px auto; padding: 0 16px; }
-    h1 { color: #1a73e8; }
+    /* Colours taken from gesture_suite_3emg/gs_theme.m */
+    :root[data-theme="hacker"] {
+      --bg: #000000; --panel: #050d05; --fg: #00ff40; --dim: #008c26;
+      --accent: #99ff99; --warn: #ffbf00; --bad: #ff3333; --good: #00ff40;
+      --btn: #001f08; --btn-hover: #003310; --field: #000f03; --grid: #00591a;
+      --border: #008c26; --tab: #000000; --tab-active: #050d05;
+      --c1: #00ff40; --c2: #00d9ff; --c3: #ffd900; --c4: #b3ff4d; --c5: #ff731a;
+      --font: Consolas, "Cascadia Mono", "Courier New", monospace;
+      --glow: 0 0 6px rgba(0, 255, 64, .45);
+    }
+    :root[data-theme="default"] {
+      --bg: #f0f0f0; --panel: #f0f0f0; --fg: #000000; --dim: #666666;
+      --accent: #336699; --warn: #bf5900; --bad: #bf3333; --good: #1a7326;
+      --btn: #fdfdfd; --btn-hover: #e5f1fb; --field: #ffffff; --grid: #d0d0d0;
+      --border: #b4b4b4; --tab: #e1e1e1; --tab-active: #f0f0f0;
+      --c1: #0072bd; --c2: #d95319; --c3: #77ac30; --c4: #7e2f8e; --c5: #4dbeee;
+      --font: "Segoe UI", Helvetica, Arial, sans-serif;
+      --glow: none;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { margin: 0; }
+    body {
+      background: var(--bg); color: var(--fg); font-family: var(--font);
+      font-size: 14px; line-height: 1.45; min-height: 100vh;
+    }
+    .window { max-width: 1280px; margin: 0 auto; padding: 8px; display: flex; flex-direction: column; gap: 4px; }
+
+    /* hacker banner (gs_build_gui: root@teensy:~$ ...) */
+    .banner { height: 26px; font-size: 14px; font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-shadow: var(--glow); }
+    :root[data-theme="default"] .banner { display: none; }
+    .cursor { animation: blink 1s steps(1) infinite; }
+    @keyframes blink { 50% { opacity: 0; } }
+
+    /* connection bar (gs_connection_bar) */
+    .connbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-height: 32px; }
+    .connbar .grow { flex: 1 1 120px; }
+    .diag { font-size: 10px; color: #805099; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; height: 16px; }
+    :root[data-theme="hacker"] .diag { color: var(--dim); }
+
+    select, button, input, textarea { font: inherit; color: var(--fg); }
+    select, .field {
+      background: var(--field); border: 1px solid var(--border); height: 26px; padding: 0 6px; border-radius: 0;
+    }
+    :root[data-theme="default"] select, :root[data-theme="default"] .field { border-radius: 3px; }
+    button {
+      background: var(--btn); border: 1px solid var(--border); height: 26px; padding: 0 12px;
+      cursor: pointer; border-radius: 0;
+    }
+    :root[data-theme="default"] button { border-radius: 3px; }
+    button:hover { background: var(--btn-hover); }
+    button:focus-visible, select:focus-visible, a:focus-visible, .tab:focus-visible { outline: 1px dashed var(--accent); outline-offset: 2px; }
+    button:disabled { opacity: .45; cursor: default; }
+    .status { color: var(--good); white-space: nowrap; }
+    .drops { font-weight: bold; color: var(--good); white-space: nowrap; }
+
+    /* tab group */
+    .tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border); margin-top: 4px; overflow-x: auto; }
+    .tab {
+      background: var(--tab); border: 1px solid var(--border); border-bottom: none; padding: 4px 14px;
+      height: auto; color: var(--dim); white-space: pre;
+    }
+    .tab[aria-selected="true"] { background: var(--tab-active); color: var(--fg); position: relative; top: 1px; font-weight: bold; }
+    .pane { display: none; padding: 6px 0; }
+    .pane.active { display: grid; }
+
+    /* uipanel */
+    fieldset.panel {
+      background: var(--panel); border: 1px solid var(--border); margin: 0; padding: 8px 10px 10px; min-width: 0;
+    }
+    :root[data-theme="default"] fieldset.panel { border-radius: 3px; }
+    legend { padding: 0 4px; font-size: 13px; font-weight: bold; }
+
+    .two-col { grid-template-columns: 330px 1fr; gap: 8px; }
+    .col { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+    .muted { color: var(--dim); }
+    .accent { color: var(--accent); font-weight: bold; }
+
+    .big {
+      font-size: 44px; font-weight: bold; text-align: center; line-height: 1.1; margin: 10px 0 4px;
+      color: var(--fg); text-shadow: var(--glow); word-break: break-word;
+    }
+    .sub { text-align: center; color: var(--dim); min-height: 22px; }
+
+    .checks label { display: flex; align-items: center; gap: 8px; padding: 2px 0; }
+    .checks input { accent-color: var(--fg); margin: 0; }
+    :root[data-theme="default"] .checks input { accent-color: var(--accent); }
+
+    .kv { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; align-items: center; }
+
+    /* live signal plot */
+    .plot-wrap { position: relative; }
+    canvas { display: block; width: 100%; height: 300px; background: var(--bg); border: 1px solid var(--grid); }
+    .values { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; margin-top: 8px; }
+    .values div { font-weight: bold; text-align: center; font-variant-numeric: tabular-nums; }
+    .values span { display: block; font-size: 11px; font-weight: normal; }
+
+    .phase { font-size: 36px; font-weight: bold; text-align: center; }
+
+    /* top-3 cards */
+    .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+    .card { display: flex; flex-direction: column; gap: 4px; padding: 4px; text-align: center; }
+    .card .name { font-size: 26px; font-weight: bold; min-height: 70px; display: flex; align-items: center; justify-content: center; text-shadow: var(--glow); }
+    .card + .card .name { font-size: 22px; color: var(--dim); text-shadow: none; }
+    .card .desc { color: var(--dim); font-size: 13px; min-height: 40px; }
+    .card button { font-weight: bold; }
+    :root[data-theme="default"] .card .ok { background: #cceecc; }
+
+    /* uitable */
+    .table-wrap { overflow-x: auto; }
+    table { border-collapse: collapse; width: 100%; font-size: 13px; }
+    th, td { border: 1px solid var(--grid); padding: 3px 8px; text-align: left; white-space: nowrap; }
+    th { background: var(--panel); color: var(--fg); font-weight: bold; }
+    :root[data-theme="default"] th { background: #e6e6e6; }
+    tr:nth-child(odd) td { background: var(--field); }
+    tr:nth-child(even) td { background: var(--panel); }
+
+    .log {
+      background: var(--field); border: 1px solid var(--border); font-family: Consolas, "Courier New", monospace;
+      font-size: 11px; padding: 6px; height: 140px; overflow-y: auto; white-space: pre-wrap; color: var(--fg);
+    }
+
+    a { color: var(--accent); }
+    .one-col { grid-template-columns: 1fr; gap: 8px; }
+
+    @media (max-width: 860px) {
+      .two-col { grid-template-columns: 1fr; }
+      .cards { grid-template-columns: 1fr; }
+      .card .name { min-height: 0; }
+      .big { font-size: 32px; }
+      .values { grid-template-columns: repeat(3, 1fr); }
+      canvas { height: 240px; }
+      .connbar .drops { display: none; }
+    }
+    @media (max-width: 480px) {
+      .window { padding: 8px 16px; }
+      .big { font-size: 26px; }
+    }
   </style>
 </head>
 <body>
-  <h1>Sidi Ahmed Hammouda</h1>
-  <p>Electrical engineering student — AI, embedded systems, computer vision.</p>
-  <h2>Projects</h2>
-  <p>Nidham: EMG + IMU fatigue detection.</p>
-  <h2>Contact</h2>
-  <p>your@email.com</p>
+<div class="window">
+
+  <div class="banner" id="banner" aria-hidden="true"></div>
+
+  <!-- connection bar -->
+  <div>
+    <div class="connbar">
+      <select id="ddPage" aria-label="Page">
+        <option value="about">about</option>
+        <option value="projects">projects</option>
+        <option value="contact">contact</option>
+      </select>
+      <button id="btnTheme" type="button" title="Switch theme">Theme: hacker</button>
+      <button id="btnStart" type="button" disabled>Start</button>
+      <button id="btnStop" type="button">Stop</button>
+      <span class="status" id="status">status: running ahmedltaief.github.io</span>
+      <span class="grow"></span>
+      <span class="drops" id="drops">drops: 0 | gaps: 0</span>
+    </div>
+    <div class="diag" id="diag">diag: -</div>
+  </div>
+
+  <!-- tabs -->
+  <div class="tabs" role="tablist">
+    <button class="tab" role="tab" id="tab-about" aria-controls="about" aria-selected="true">  About  </button>
+    <button class="tab" role="tab" id="tab-projects" aria-controls="projects" aria-selected="false" tabindex="-1">  Projects  </button>
+    <button class="tab" role="tab" id="tab-contact" aria-controls="contact" aria-selected="false" tabindex="-1">  Contact  </button>
+  </div>
+
+  <!-- ================= About ================= -->
+  <section class="pane two-col active" id="about" role="tabpanel" aria-labelledby="tab-about">
+    <div class="col">
+      <fieldset class="panel">
+        <legend>Profile</legend>
+        <div class="kv">
+          <span class="muted">name:</span><span>Sidi Ahmed Hammouda</span>
+          <span class="muted">field:</span><span>Electrical engineering</span>
+          <span class="muted">status:</span><span>student</span>
+        </div>
+      </fieldset>
+      <fieldset class="panel checks">
+        <legend>Interests</legend>
+        <label><input type="checkbox" checked disabled> AI</label>
+        <label><input type="checkbox" checked disabled> Embedded systems</label>
+        <label><input type="checkbox" checked disabled> Computer vision</label>
+      </fieldset>
+      <fieldset class="panel">
+        <legend>Rig</legend>
+        <div class="kv">
+          <span class="muted">EMG:</span><span>3 channels</span>
+          <span class="muted">IMU:</span><span>2 units</span>
+          <span class="muted">fs:</span><span>1000 Hz</span>
+          <span class="muted">MCU:</span><span>Teensy</span>
+        </div>
+      </fieldset>
+      <div class="log" id="log" aria-label="Log"></div>
+    </div>
+
+    <div class="col">
+      <fieldset class="panel">
+        <legend>Attempt</legend>
+        <h1 class="big" id="bigName">SIDI AHMED HAMMOUDA</h1>
+        <div class="sub" id="subLine">Electrical engineering student - AI, embedded systems, computer vision.</div>
+      </fieldset>
+      <fieldset class="panel">
+        <legend>EMG(3) + IMU(2) - live values</legend>
+        <div class="plot-wrap">
+          <canvas id="plot" aria-label="Animated EMG and IMU signals" role="img"></canvas>
+        </div>
+        <div class="values" id="values"></div>
+      </fieldset>
+      <fieldset class="panel">
+        <legend>Protocol</legend>
+        <div class="phase" id="phase">HOLD</div>
+        <div class="sub" id="phaseSub">rep 1/5</div>
+      </fieldset>
+    </div>
+  </section>
+
+  <!-- ================= Projects ================= -->
+  <section class="pane one-col" id="projects" role="tabpanel" aria-labelledby="tab-projects">
+    <fieldset class="panel">
+      <legend>Top 3 projects</legend>
+      <div class="cards">
+        <div class="card">
+          <div class="name">Nidham</div>
+          <div class="desc">EMG + IMU fatigue detection</div>
+          <div class="muted">#1</div>
+          <button type="button" class="ok" data-goto="nidham">&#10004;  Open</button>
+        </div>
+        <div class="card">
+          <div class="name">--</div>
+          <div class="desc">coming soon</div>
+          <div class="muted">#2</div>
+          <button type="button" disabled>It was this one</button>
+        </div>
+        <div class="card">
+          <div class="name">--</div>
+          <div class="desc">coming soon</div>
+          <div class="muted">#3</div>
+          <button type="button" disabled>It was this one</button>
+        </div>
+      </div>
+    </fieldset>
+
+    <fieldset class="panel" id="nidham">
+      <legend>Nidham - EMG + IMU fatigue detection</legend>
+      <p>Muscle-fatigue detection from surface EMG combined with IMU motion data, streamed from a 3-EMG + 2-IMU rig at 1000 Hz.</p>
+    </fieldset>
+
+    <fieldset class="panel">
+      <legend>History</legend>
+      <div class="accent" style="margin-bottom:4px">projects: 1 | in progress: 1</div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>#</th><th>project</th><th>area</th><th>sensors</th><th>status</th></tr></thead>
+          <tbody>
+            <tr><td>1</td><td>Nidham</td><td>fatigue detection</td><td>EMG + IMU</td><td style="color:var(--warn)">in progress</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </fieldset>
+  </section>
+
+  <!-- ================= Contact ================= -->
+  <section class="pane two-col" id="contact" role="tabpanel" aria-labelledby="tab-contact">
+    <div class="col">
+      <fieldset class="panel">
+        <legend>Contact</legend>
+        <div class="kv">
+          <label class="muted" for="fEmail">email:</label>
+          <input class="field" id="fEmail" value="your@email.com" readonly>
+          <label class="muted" for="fWeb">site:</label>
+          <input class="field" id="fWeb" value="ahmedltaief.github.io" readonly>
+        </div>
+        <div style="margin-top:8px; display:flex; gap:6px; flex-wrap:wrap">
+          <button type="button" id="btnCopy">Copy email</button>
+          <a href="mailto:your@email.com"><button type="button" tabindex="-1">Send mail</button></a>
+        </div>
+      </fieldset>
+    </div>
+    <div class="col">
+      <fieldset class="panel">
+        <legend>Status</legend>
+        <div class="phase" style="color:var(--good)">OPEN TO CONTACT</div>
+        <div class="sub">questions, collaborations, internships</div>
+      </fieldset>
+    </div>
+  </section>
+
+</div>
+
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const root = document.documentElement;
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  /* ---------- theme ---------- */
+  let theme = 'hacker';
+  try { theme = localStorage.getItem('theme') || 'hacker'; } catch (e) {}
+  function applyTheme(t) {
+    theme = t; root.dataset.theme = t;
+    $('btnTheme').textContent = 'Theme: ' + t;
+    try { localStorage.setItem('theme', t); } catch (e) {}
+  }
+  applyTheme(theme);
+  $('btnTheme').onclick = () => { applyTheme(theme === 'hacker' ? 'default' : 'hacker'); log('theme -> ' + theme); };
+  const css = n => getComputedStyle(root).getPropertyValue(n).trim();
+
+  /* ---------- typewriter (gs_type) ---------- */
+  function type(el, txt, done) {
+    if (theme !== 'hacker' || reduce) { el.textContent = txt; done && done(); return; }
+    clearInterval(el._t);
+    const step = Math.max(1, Math.ceil(txt.length / 20)); let k = 0;
+    el._t = setInterval(() => {
+      k = Math.min(txt.length, k + step);
+      el.textContent = txt.slice(0, k) + (k < txt.length ? '█' : '');
+      if (k >= txt.length) { clearInterval(el._t); done && done(); }
+    }, 20);
+  }
+
+  const now = new Date(), pad = n => String(n).padStart(2, '0');
+  const stamp = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
+  const bannerTxt = `root@teensy:~$ ./portfolio --emg 3 --imu 2 --fs 1000   // ${stamp}`;
+  type($('banner'), bannerTxt, () => { $('banner').innerHTML = bannerTxt.replace(/&/g,'&amp;').replace(/</g,'&lt;') + ' <span class="cursor">█</span>'; });
+
+  /* ---------- log ---------- */
+  function log(msg) {
+    const t = new Date(), line = `[${pad(t.getHours())}:${pad(t.getMinutes())}:${pad(t.getSeconds())}] ${msg}\n`;
+    $('log').textContent += line; $('log').scrollTop = 1e9;
+  }
+  log('connected ahmedltaief.github.io - streaming');
+  log('rig: EMG(3) + IMU(2) @ 1000 Hz');
+
+  /* ---------- tabs ---------- */
+  const tabs = [...document.querySelectorAll('.tab')];
+  function show(id) {
+    tabs.forEach(t => {
+      const on = t.getAttribute('aria-controls') === id;
+      t.setAttribute('aria-selected', on); t.tabIndex = on ? 0 : -1;
+      $(t.getAttribute('aria-controls')).classList.toggle('active', on);
+    });
+    $('ddPage').value = id;
+    if (location.hash.slice(1) !== id) history.replaceState(null, '', '#' + id);
+    log('tab -> ' + id);
+  }
+  tabs.forEach((t, i) => {
+    t.onclick = () => show(t.getAttribute('aria-controls'));
+    t.onkeydown = e => {
+      const d = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0;
+      if (!d) return;
+      const n = tabs[(i + d + tabs.length) % tabs.length]; n.focus(); n.click();
+    };
+  });
+  $('ddPage').onchange = e => show(e.target.value);
+  const startTab = location.hash.slice(1);
+  if (['about','projects','contact'].includes(startTab)) show(startTab);
+
+  document.querySelectorAll('[data-goto]').forEach(b => b.onclick = () =>
+    $(b.dataset.goto).scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' }));
+
+  $('btnCopy').onclick = async () => {
+    try { await navigator.clipboard.writeText($('fEmail').value); log('email copied'); }
+    catch (e) { $('fEmail').select(); log('copy blocked - select and copy manually'); }
+  };
+
+  /* ---------- live signals ---------- */
+  const CH = [
+    { name: 'EMG1', v: '--c1', kind: 'emg', phase: 0.0 },
+    { name: 'EMG2', v: '--c2', kind: 'emg', phase: 1.3 },
+    { name: 'EMG3', v: '--c3', kind: 'emg', phase: 2.6 },
+    { name: 'IMU1', v: '--c4', kind: 'imu', f: 0.55 },
+    { name: 'IMU2', v: '--c5', kind: 'imu', f: 0.35 },
+  ];
+  const valuesEl = $('values');
+  CH.forEach(c => { const d = document.createElement('div'); d.innerHTML = `<span>${c.name}</span><b>0.00</b>`; valuesEl.appendChild(d); c.el = d.querySelector('b'); c.lbl = d; });
+
+  const cv = $('plot'), ctx = cv.getContext('2d');
+  const N = 600;                        // samples on screen
+  const buf = CH.map(() => new Float32Array(N));
+  let head = 0, t = 0, rows = 0, bytes = 0, running = true;
+
+  // protocol cycle like gesture collection: PREP -> HOLD -> REST
+  const PH = [['PREP', 1.5, '--warn'], ['HOLD', 3, '--good'], ['REST', 2, '--dim']];
+  let pi = 1, pT = 0, rep = 1;
+
+  function gauss() { return Math.sqrt(-2 * Math.log(Math.random() + 1e-9)) * Math.cos(2 * Math.PI * Math.random()); }
+
+  function sample(dt) {
+    t += dt; pT += dt;
+    if (pT > PH[pi][1]) {
+      pT = 0; pi = (pi + 1) % 3; if (pi === 0) rep = rep % 5 + 1;
+      $('phase').textContent = PH[pi][0]; $('phase').style.color = `var(${PH[pi][2]})`;
+      $('phaseSub').textContent = `rep ${rep}/5`;
+    }
+    const active = PH[pi][0] === 'HOLD' ? 1 : 0.08;
+    CH.forEach((c, k) => {
+      let y;
+      if (c.kind === 'emg') {
+        const env = active * (0.6 + 0.4 * Math.sin(t * 1.7 + c.phase)) + 0.05;
+        y = gauss() * env * 0.33;
+      } else {
+        y = 0.6 * Math.sin(2 * Math.PI * c.f * t) + 0.25 * Math.sin(2 * Math.PI * c.f * 3.1 * t + k) + 0.03 * gauss();
+      }
+      buf[k][head] = y;
+    });
+    head = (head + 1) % N; rows++; bytes += 38;
+  }
+
+  function resize() {
+    const r = cv.getBoundingClientRect(), dpr = Math.min(2, devicePixelRatio || 1);
+    cv.width = Math.max(1, r.width * dpr); cv.height = Math.max(1, r.height * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  addEventListener('resize', resize); resize();
+
+  function draw() {
+    const W = cv.clientWidth, H = cv.clientHeight, lane = H / CH.length;
+    ctx.fillStyle = css('--bg'); ctx.fillRect(0, 0, W, H);
+    ctx.strokeStyle = css('--grid'); ctx.lineWidth = 1; ctx.globalAlpha = theme === 'hacker' ? 0.5 : 1;
+    ctx.beginPath();
+    for (let x = 0; x <= W; x += W / 10) { ctx.moveTo(x + .5, 0); ctx.lineTo(x + .5, H); }
+    for (let k = 0; k <= CH.length; k++) { ctx.moveTo(0, k * lane + .5); ctx.lineTo(W, k * lane + .5); }
+    ctx.stroke(); ctx.globalAlpha = 1;
+    ctx.font = '11px ' + css('--font');
+    CH.forEach((c, k) => {
+      const col = css(c.v), mid = k * lane + lane / 2, amp = lane * 0.45;
+      ctx.strokeStyle = col; ctx.lineWidth = 1.2;
+      if (theme === 'hacker') { ctx.shadowColor = col; ctx.shadowBlur = 4; }
+      ctx.beginPath();
+      for (let i = 0; i < N; i++) {
+        const y = buf[k][(head + i) % N], x = i / (N - 1) * W, py = mid - Math.max(-1, Math.min(1, y)) * amp;
+        i ? ctx.lineTo(x, py) : ctx.moveTo(x, py);
+      }
+      ctx.stroke(); ctx.shadowBlur = 0;
+      ctx.fillStyle = col; ctx.fillText(c.name, 6, k * lane + 13);
+    });
+  }
+
+  let last = performance.now(), lastUi = 0;
+  function frame(ts) {
+    const dt = Math.min(0.05, (ts - last) / 1000); last = ts;
+    if (running) {
+      const n = Math.round(dt * 200);           // 200 drawn samples/s (display decimated from 1 kHz)
+      for (let i = 0; i < n; i++) sample(1 / 200);
+      draw();
+    }
+    if (ts - lastUi > 120) {
+      lastUi = ts;
+      CH.forEach((c, k) => { c.el.textContent = buf[k][(head - 1 + N) % N].toFixed(2); c.el.style.color = css(c.v); c.lbl.querySelector('span').style.color = css(c.v); });
+      $('diag').textContent = `diag: bytes ${bytes} | rows ${rows} | last: ${CH.map((c,k)=>buf[k][(head-1+N)%N].toFixed(3)).join(',')} | err: (none)`;
+    }
+    requestAnimationFrame(frame);
+  }
+  for (let i = 0; i < N; i++) sample(1 / 200);
+  draw();
+  if (!reduce) requestAnimationFrame(frame); else { running = false; frame(performance.now()); }
+
+  /* ---------- start / stop ---------- */
+  function setRun(on) {
+    running = on; $('btnStart').disabled = on; $('btnStop').disabled = !on;
+    const s = $('status');
+    s.style.color = on ? 'var(--good)' : 'var(--warn)';
+    type(s, on ? 'status: running ahmedltaief.github.io' : 'status: stopped ahmedltaief.github.io');
+    log(on ? 'stream started' : 'stream stopped');
+    if (on) last = performance.now();
+  }
+  $('btnStart').onclick = () => setRun(true);
+  $('btnStop').onclick = () => setRun(false);
+  if (reduce) { $('btnStart').disabled = true; $('btnStop').disabled = true; }
+})();
+</script>
 </body>
 </html>

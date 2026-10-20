@@ -212,16 +212,16 @@
         <div class="sub" id="subLine">Electrical engineering student - AI, embedded systems, computer vision.</div>
       </fieldset>
       <fieldset class="panel">
-        <legend>EMG(3) + IMU(2) - <span id="plotTag" style="color:var(--warn)">SIMULATED</span></legend>
+        <legend>EMG(3) + IMU(2) - <span id="plotTag" style="color:var(--dim)">NO DATA</span></legend>
         <div class="plot-wrap">
           <canvas id="plot" aria-label="Animated EMG and IMU signals" role="img"></canvas>
         </div>
         <div class="values" id="values"></div>
       </fieldset>
       <fieldset class="panel">
-        <legend>Protocol</legend>
-        <div class="phase" id="phase">HOLD</div>
-        <div class="sub" id="phaseSub">rep 1/5 - simulated demo</div>
+        <legend>Subject</legend>
+        <div class="phase" id="phase" style="color:var(--dim)">NO DATA</div>
+        <div class="sub" id="phaseSub">nobody is streaming right now</div>
       </fieldset>
     </div>
   </section>
@@ -340,7 +340,7 @@
     const t = new Date(), line = `[${pad(t.getHours())}:${pad(t.getMinutes())}:${pad(t.getSeconds())}] ${msg}\n`;
     $('log').textContent += line; $('log').scrollTop = 1e9;
   }
-  log('rig: EMG(3) + IMU(2) @ 1000 Hz, shown at 100 Hz');
+  log('rig: EMG(3) + IMU(2) @ 1000 Hz, shown at 100 Hz - real data only');
 
   /* ---------- tabs ---------- */
   const tabs = [...document.querySelectorAll('.tab')];
@@ -375,25 +375,27 @@
   };
 
   /* ---------- live signals ----------
-     LIVE : rows from the rig via MQTT (MATLAB gs_web_broadcast -> web_bridge.py -> broker)
-     SIM  : clearly labelled synthetic demo while the rig is offline */
+     Real data only: rows from the rig via MQTT (MATLAB gs_web_broadcast -> web_bridge.py -> broker).
+     No data -> empty plot + NO DATA. Nothing is ever simulated. */
   const TOPIC = 'ahmedltaief/nidham/6600fdf3';           // must match web_bridge.py
   const BROKER = 'wss://broker.hivemq.com:8884/mqtt';
   const LIVE_TIMEOUT_MS = 3000;
+  const SUBJECT_RE = /^P\d{2,3}$/;
   const COLS = ['--c1', '--c2', '--c3', '--c4', '--c5'];
 
   const N = 600;                        // samples on screen (6 s at 100 Hz)
-  let CH = [], buf = [], head = 0, t = 0, rows = 0, bytes = 0, running = true;
-  let mode = 'sim', lastLive = 0, bridge = 'offline', liveInfo = { drops: 0, gaps: 0, seq: 0, rig: '' };
+  let CH = [], buf = [], filled = 0, head = 0, rows = 0, bytes = 0, running = true;
+  let mode = 'off', lastLive = 0, bridge = 'offline', subject = '';
+  let liveInfo = { drops: 0, gaps: 0, seq: 0, rig: '' };
   const valuesEl = $('values');
 
   function setChannels(nemg) {
     CH = [];
-    for (let i = 0; i < nemg; i++) CH.push({ name: 'EMG' + (i + 1), kind: 'emg', phase: i * 1.3 });
-    CH.push({ name: 'IMU1 |gyro|', kind: 'imu', f: 0.55 });
-    CH.push({ name: 'IMU2 |gyro|', kind: 'imu', f: 0.35 });
+    for (let i = 0; i < nemg; i++) CH.push({ name: 'EMG' + (i + 1), kind: 'emg' });
+    CH.push({ name: 'IMU1 |gyro|', kind: 'imu' });
+    CH.push({ name: 'IMU2 |gyro|', kind: 'imu' });
     CH.forEach((c, k) => { c.v = COLS[k % COLS.length]; c.mean = NaN; c.peak = 1e-6; c.raw = NaN; });
-    buf = CH.map(() => new Float32Array(N)); head = 0;
+    buf = CH.map(() => new Float32Array(N)); head = 0; filled = 0;
     valuesEl.style.gridTemplateColumns = `repeat(${Math.min(CH.length, 5)}, 1fr)`;
     valuesEl.innerHTML = '';
     CH.forEach(c => {
@@ -420,45 +422,30 @@
       buf[k][head] = 2 * v / c.peak - 1;
     }
   }
-  function advance() { head = (head + 1) % N; rows++; }
+  function advance() { head = (head + 1) % N; rows++; filled = Math.min(N, filled + 1); }
 
-  // ---- simulated demo (protocol cycle like gesture collection: PREP -> HOLD -> REST)
-  const PH = [['PREP', 1.5, '--warn'], ['HOLD', 3, '--good'], ['REST', 2, '--dim']];
-  let pi = 1, pT = 0, rep = 1;
-  function gauss() { return Math.sqrt(-2 * Math.log(Math.random() + 1e-9)) * Math.cos(2 * Math.PI * Math.random()); }
-  function simSample(dt) {
-    t += dt; pT += dt;
-    if (pT > PH[pi][1]) {
-      pT = 0; pi = (pi + 1) % 3; if (pi === 0) rep = rep % 5 + 1;
-      $('phase').textContent = PH[pi][0]; $('phase').style.color = `var(${PH[pi][2]})`;
-      $('phaseSub').textContent = `rep ${rep}/5 - simulated demo`;
-    }
-    const active = PH[pi][0] === 'HOLD' ? 1 : 0.08;
-    CH.forEach((c, k) => {
-      if (c.kind === 'emg') {
-        const env = active * (0.6 + 0.4 * Math.sin(t * 1.7 + c.phase)) + 0.05;
-        push(k, 2048 + gauss() * env * 400);
-      } else {
-        push(k, Math.abs(1.5 * Math.sin(2 * Math.PI * c.f * t) + 0.5 * Math.sin(2 * Math.PI * c.f * 3.1 * t + k)) + 0.03 * Math.abs(gauss()));
-      }
-    });
-    advance();
+  function showSubject() {
+    const live = mode === 'live';
+    $('phase').textContent = live ? subject : 'NO DATA';
+    $('phase').style.color = live ? 'var(--good)' : 'var(--dim)';
+    $('phaseSub').textContent = live ? `streaming now - packet ${liveInfo.seq}`
+      : bridge === 'idle' ? 'bridge online - nobody is streaming right now'
+      : 'nobody is streaming right now';
   }
 
-  // ---- live rows from the rig: [t_ms, emg1..N, IMU1 acc xyz, gyro xyz, IMU2 acc xyz, gyro xyz]
+  // ---- live rows: [t_ms, emg1..N, IMU1 acc xyz, gyro xyz, IMU2 acc xyz, gyro xyz]
   function onLive(msg, nbytes) {
     if (!msg || msg.v !== 1 || !Array.isArray(msg.rows)) return;
     const ne = Number(msg.nemg);
     if (!Number.isInteger(ne) || ne < 1 || ne > 12 || msg.rows.length > 200) return;
-    if (mode !== 'live' || CH.length !== ne + 2) {
-      mode = 'live'; setChannels(ne);
-      log(`LIVE: rig ${String(msg.rig).slice(0, 8)} streaming (${ne} EMG + 2 IMU, shown at ${Number(msg.fs) || 100} Hz)`);
-      $('phase').textContent = 'LIVE'; $('phase').style.color = 'var(--good)';
+    if (typeof msg.subject !== 'string' || !SUBJECT_RE.test(msg.subject)) return;   // no subject -> ignore
+    if (mode !== 'live' || CH.length !== ne + 2 || subject !== msg.subject) {
+      mode = 'live'; subject = msg.subject; setChannels(ne);
+      log(`LIVE: subject ${subject} on rig ${String(msg.rig).slice(0, 8)} (${ne} EMG + 2 IMU, shown at ${Number(msg.fs) || 100} Hz)`);
     }
     lastLive = Date.now(); bytes += nbytes;
     liveInfo = { drops: msg.drops | 0, gaps: msg.gaps | 0, seq: msg.seq | 0, rig: String(msg.rig).slice(0, 8) };
-    setStatus();
-    $('phaseSub').textContent = `real data from the rig - packet ${liveInfo.seq}`;
+    setStatus(); showSubject();
     if (!running) return;
     for (const r of msg.rows) {
       if (!Array.isArray(r) || r.length !== 1 + ne + 12) continue;
@@ -469,34 +456,33 @@
     }
   }
 
-  function goSim(reason) {
-    if (mode === 'sim') { setStatus(); return; }
-    mode = 'sim'; setChannels(3); log('rig offline -> simulated demo' + (reason ? ` (${reason})` : ''));
-    $('phase').textContent = PH[pi][0]; $('phase').style.color = `var(${PH[pi][2]})`;
-    setStatus();
+  function goOffline(reason) {
+    if (mode === 'off') { setStatus(); showSubject(); return; }
+    mode = 'off'; log(`subject ${subject} stopped streaming` + (reason ? ` (${reason})` : ''));
+    subject = ''; setChannels(3);
+    setStatus(); showSubject();
   }
 
   function setStatus() {
     const s = $('status');
     let txt, col;
-    if (!running)                { txt = 'status: stopped (display paused)'; col = 'var(--warn)'; }
-    else if (mode === 'live')    { txt = 'status: LIVE - real signals from the rig'; col = 'var(--good)'; }
-    else if (bridge === 'idle')  { txt = 'status: bridge online, rig idle - simulated'; col = 'var(--warn)'; }
-    else                         { txt = 'status: rig offline - simulated demo'; col = 'var(--dim)'; }
-    $('plotTag').textContent = mode === 'live' ? 'LIVE' : 'SIMULATED';
-    $('plotTag').style.color = mode === 'live' ? 'var(--good)' : 'var(--warn)';
+    if (mode === 'live')         { txt = `status: LIVE - subject ${subject}` + (running ? '' : ' (display paused)'); col = running ? 'var(--good)' : 'var(--warn)'; }
+    else if (bridge === 'idle')  { txt = 'status: bridge online - waiting for real data'; col = 'var(--warn)'; }
+    else                         { txt = 'status: rig offline - no data'; col = 'var(--dim)'; }
+    $('plotTag').textContent = mode === 'live' ? 'LIVE - ' + subject : 'NO DATA';
+    $('plotTag').style.color = mode === 'live' ? 'var(--good)' : 'var(--dim)';
     if (s._txt === txt) return;
     s._txt = txt; s.style.color = col; type(s, txt);
   }
 
   // ---- MQTT (public broker: treat every message as untrusted, validate shape)
   function connectBroker() {
-    if (!window.mqtt) { log('mqtt library failed to load - simulated only'); return; }
+    if (!window.mqtt) { log('mqtt library failed to load - no live data'); return; }
     const cl = mqtt.connect(BROKER, {
       clientId: 'web-' + Math.random().toString(16).slice(2, 10),
       clean: true, reconnectPeriod: 5000, connectTimeout: 8000
     });
-    cl.on('connect', () => { log('broker connected - waiting for the rig'); cl.subscribe([TOPIC + '/live', TOPIC + '/status']); });
+    cl.on('connect', () => { log('broker connected - waiting for real data'); cl.subscribe([TOPIC + '/live', TOPIC + '/status']); });
     cl.on('offline', () => log('broker offline - retrying'));
     cl.on('error', e => log('broker error: ' + (e && e.message)));
     cl.on('message', (topic, payload) => {
@@ -506,7 +492,7 @@
         const st = String(msg && msg.state);
         if (['streaming', 'idle', 'offline'].includes(st) && st !== bridge) {
           bridge = st; log('bridge: ' + st);
-          if (st !== 'streaming') goSim(st); else setStatus();
+          if (st !== 'streaming') goOffline(st); else setStatus();
         }
       } else onLive(msg, payload.length);
     });
@@ -519,8 +505,8 @@
     const r = cv.getBoundingClientRect(), dpr = Math.min(2, devicePixelRatio || 1);
     cv.width = Math.max(1, r.width * dpr); cv.height = Math.max(1, r.height * dpr);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    draw();
   }
-  addEventListener('resize', resize); resize();
 
   function draw() {
     const W = cv.clientWidth, H = cv.clientHeight, lane = H / CH.length;
@@ -533,26 +519,30 @@
     ctx.font = '11px ' + css('--font');
     CH.forEach((c, k) => {
       const col = css(c.v), mid = k * lane + lane / 2, amp = lane * 0.45;
-      ctx.strokeStyle = col; ctx.lineWidth = 1.2;
-      if (theme === 'hacker') { ctx.shadowColor = col; ctx.shadowBlur = 4; }
-      ctx.beginPath();
-      for (let i = 0; i < N; i++) {
-        const y = buf[k][(head + i) % N], x = i / (N - 1) * W, py = mid - Math.max(-1, Math.min(1, y)) * amp;
-        i ? ctx.lineTo(x, py) : ctx.moveTo(x, py);
+      if (filled > 1) {                  // only samples that really arrived; newest at the right edge
+        ctx.strokeStyle = col; ctx.lineWidth = 1.2;
+        if (theme === 'hacker') { ctx.shadowColor = col; ctx.shadowBlur = 4; }
+        ctx.beginPath();
+        for (let i = N - filled; i < N; i++) {
+          const y = buf[k][(head + i) % N], x = i / (N - 1) * W, py = mid - Math.max(-1, Math.min(1, y)) * amp;
+          i === N - filled ? ctx.moveTo(x, py) : ctx.lineTo(x, py);
+        }
+        ctx.stroke(); ctx.shadowBlur = 0;
       }
-      ctx.stroke(); ctx.shadowBlur = 0;
       ctx.fillStyle = col; ctx.fillText(c.name, 6, k * lane + 13);
     });
-  }
-
-  let last = performance.now(), lastUi = 0;
-  function frame(ts) {
-    const dt = Math.min(0.05, (ts - last) / 1000); last = ts;
-    if (mode === 'live' && Date.now() - lastLive > LIVE_TIMEOUT_MS) goSim('no data for 3 s');
-    if (running && mode === 'sim') {
-      const n = Math.round(dt * 100);
-      for (let i = 0; i < n; i++) simSample(1 / 100);
+    if (mode !== 'live') {
+      ctx.fillStyle = css('--dim'); ctx.textAlign = 'center';
+      ctx.font = 'bold 16px ' + css('--font');
+      ctx.fillText('NO DATA - waiting for the rig', W / 2, H / 2 + 5);
+      ctx.textAlign = 'start';
     }
+  }
+  addEventListener('resize', resize); resize();
+
+  let lastUi = 0;
+  function frame(ts) {
+    if (mode === 'live' && Date.now() - lastLive > LIVE_TIMEOUT_MS) goOffline('no data for 3 s');
     if (running) draw();
     if (ts - lastUi > 120) {
       lastUi = ts;
@@ -564,25 +554,21 @@
       $('drops').textContent = live ? `drops: ${liveInfo.drops} | gaps: ${liveInfo.gaps}` : 'drops: - | gaps: -';
       $('drops').style.color = live && (liveInfo.drops || liveInfo.gaps) ? 'var(--bad)' : live ? 'var(--good)' : 'var(--dim)';
       $('diag').textContent = live
-        ? `diag: bytes ${bytes} | rows ${rows} | rig ${liveInfo.rig} | packet ${liveInfo.seq} | topic ${TOPIC}`
-        : `diag: simulated | bridge ${bridge} | topic ${TOPIC}`;
+        ? `diag: subject ${subject} | bytes ${bytes} | rows ${rows} | rig ${liveInfo.rig} | packet ${liveInfo.seq}`
+        : `diag: no data | bridge ${bridge} | topic ${TOPIC}`;
     }
     requestAnimationFrame(frame);
   }
-  for (let i = 0; i < N; i++) simSample(1 / 100);
-  if (reduce) running = false;
-  draw(); setStatus();
+  setStatus(); showSubject();
   requestAnimationFrame(frame);
 
-  /* ---------- start / stop (pauses the display only) ---------- */
+  /* ---------- pause / resume (display only) ---------- */
   function setRun(on) {
     running = on; $('btnStart').disabled = on; $('btnStop').disabled = !on;
     setStatus(); log(on ? 'display resumed' : 'display paused');
-    if (on) last = performance.now();
   }
   $('btnStart').onclick = () => setRun(true);
   $('btnStop').onclick = () => setRun(false);
-  if (reduce) { $('btnStart').disabled = false; $('btnStop').disabled = true; }
 })();
 </script>
 </body>

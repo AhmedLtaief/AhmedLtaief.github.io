@@ -320,7 +320,7 @@
 
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.2/dist/umd/supabase.min.js"></script>
 <script>
 (() => {
   const $ = id => document.getElementById(id);
@@ -400,8 +400,8 @@
      Signed-in staff see every live subject; a subject sees only their own.
      Rows arrive on the private Realtime channel live:<ID> (MATLAB -> web_bridge.py -> Supabase).
      Nothing is ever simulated: no sign-in or no stream -> empty plot. */
-  const SUPABASE_URL = 'https://YOUR-PROJECT.supabase.co';          // Project Settings -> API
-  const SUPABASE_ANON_KEY = 'YOUR-ANON-KEY';                         // anon / publishable key (public by design)
+  const SUPABASE_URL = 'https://npvekcxlmspnbcaivzox.supabase.co';          // Project Settings -> API
+  const SUPABASE_ANON_KEY = 'sb_publishable_tDt9adgiL2UFHHzLsrMjVQ_TMj4LBLz';                         // anon / publishable key (public by design)
   const LIVE_TIMEOUT_MS = 3000, SESSION_FRESH_MS = 15000, POLL_MS = 5000;
   const SUBJECT_RE = /^P\d{2,3}$/;
   const COLS = ['--c1', '--c2', '--c3', '--c4', '--c5'];

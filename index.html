@@ -160,11 +160,11 @@
         <option value="contact">contact</option>
       </select>
       <button id="btnTheme" type="button" title="Switch theme">Theme: hacker</button>
-      <button id="btnStart" type="button" disabled>Start</button>
-      <button id="btnStop" type="button">Stop</button>
-      <span class="status" id="status">status: running ahmedltaief.github.io</span>
+      <button id="btnStart" type="button" disabled>Resume</button>
+      <button id="btnStop" type="button">Pause</button>
+      <span class="status" id="status">status: connecting...</span>
       <span class="grow"></span>
-      <span class="drops" id="drops">drops: 0 | gaps: 0</span>
+      <span class="drops" id="drops">drops: - | gaps: -</span>
     </div>
     <div class="diag" id="diag">diag: -</div>
   </div>
@@ -212,7 +212,7 @@
         <div class="sub" id="subLine">Electrical engineering student - AI, embedded systems, computer vision.</div>
       </fieldset>
       <fieldset class="panel">
-        <legend>EMG(3) + IMU(2) - live values</legend>
+        <legend>EMG(3) + IMU(2) - <span id="plotTag" style="color:var(--warn)">SIMULATED</span></legend>
         <div class="plot-wrap">
           <canvas id="plot" aria-label="Animated EMG and IMU signals" role="img"></canvas>
         </div>
@@ -221,7 +221,7 @@
       <fieldset class="panel">
         <legend>Protocol</legend>
         <div class="phase" id="phase">HOLD</div>
-        <div class="sub" id="phaseSub">rep 1/5</div>
+        <div class="sub" id="phaseSub">rep 1/5 - simulated demo</div>
       </fieldset>
     </div>
   </section>
@@ -278,7 +278,7 @@
         <legend>Contact</legend>
         <div class="kv">
           <label class="muted" for="fEmail">email:</label>
-          <input class="field" id="fEmail" value="mohamedahmedltaief1@gmail.com" readonly>
+          <input class="field" id="fEmail" value="your@email.com" readonly>
           <label class="muted" for="fWeb">site:</label>
           <input class="field" id="fWeb" value="ahmedltaief.github.io" readonly>
         </div>
@@ -299,6 +299,7 @@
 
 </div>
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mqtt/5.10.1/mqtt.min.js"></script>
 <script>
 (() => {
   const $ = id => document.getElementById(id);
@@ -339,8 +340,7 @@
     const t = new Date(), line = `[${pad(t.getHours())}:${pad(t.getMinutes())}:${pad(t.getSeconds())}] ${msg}\n`;
     $('log').textContent += line; $('log').scrollTop = 1e9;
   }
-  log('connected ahmedltaief.github.io - streaming');
-  log('rig: EMG(3) + IMU(2) @ 1000 Hz');
+  log('rig: EMG(3) + IMU(2) @ 1000 Hz, shown at 100 Hz');
 
   /* ---------- tabs ---------- */
   const tabs = [...document.querySelectorAll('.tab')];
@@ -374,49 +374,147 @@
     catch (e) { $('fEmail').select(); log('copy blocked - select and copy manually'); }
   };
 
-  /* ---------- live signals ---------- */
-  const CH = [
-    { name: 'EMG1', v: '--c1', kind: 'emg', phase: 0.0 },
-    { name: 'EMG2', v: '--c2', kind: 'emg', phase: 1.3 },
-    { name: 'EMG3', v: '--c3', kind: 'emg', phase: 2.6 },
-    { name: 'IMU1', v: '--c4', kind: 'imu', f: 0.55 },
-    { name: 'IMU2', v: '--c5', kind: 'imu', f: 0.35 },
-  ];
+  /* ---------- live signals ----------
+     LIVE : rows from the rig via MQTT (MATLAB gs_web_broadcast -> web_bridge.py -> broker)
+     SIM  : clearly labelled synthetic demo while the rig is offline */
+  const TOPIC = 'ahmedltaief/nidham/6600fdf3';           // must match web_bridge.py
+  const BROKER = 'wss://broker.hivemq.com:8884/mqtt';
+  const LIVE_TIMEOUT_MS = 3000;
+  const COLS = ['--c1', '--c2', '--c3', '--c4', '--c5'];
+
+  const N = 600;                        // samples on screen (6 s at 100 Hz)
+  let CH = [], buf = [], head = 0, t = 0, rows = 0, bytes = 0, running = true;
+  let mode = 'sim', lastLive = 0, bridge = 'offline', liveInfo = { drops: 0, gaps: 0, seq: 0, rig: '' };
   const valuesEl = $('values');
-  CH.forEach(c => { const d = document.createElement('div'); d.innerHTML = `<span>${c.name}</span><b>0.00</b>`; valuesEl.appendChild(d); c.el = d.querySelector('b'); c.lbl = d; });
 
-  const cv = $('plot'), ctx = cv.getContext('2d');
-  const N = 600;                        // samples on screen
-  const buf = CH.map(() => new Float32Array(N));
-  let head = 0, t = 0, rows = 0, bytes = 0, running = true;
+  function setChannels(nemg) {
+    CH = [];
+    for (let i = 0; i < nemg; i++) CH.push({ name: 'EMG' + (i + 1), kind: 'emg', phase: i * 1.3 });
+    CH.push({ name: 'IMU1 |gyro|', kind: 'imu', f: 0.55 });
+    CH.push({ name: 'IMU2 |gyro|', kind: 'imu', f: 0.35 });
+    CH.forEach((c, k) => { c.v = COLS[k % COLS.length]; c.mean = NaN; c.peak = 1e-6; c.raw = NaN; });
+    buf = CH.map(() => new Float32Array(N)); head = 0;
+    valuesEl.style.gridTemplateColumns = `repeat(${Math.min(CH.length, 5)}, 1fr)`;
+    valuesEl.innerHTML = '';
+    CH.forEach(c => {
+      const d = document.createElement('div');
+      d.innerHTML = `<span>${c.name}</span><b>--</b>`;
+      valuesEl.appendChild(d); c.el = d.querySelector('b'); c.lbl = d.querySelector('span');
+    });
+  }
+  setChannels(3);
 
-  // protocol cycle like gesture collection: PREP -> HOLD -> REST
+  // display scaling per channel: EMG = remove running mean, divide by decaying peak;
+  // IMU |gyro| = 0..peak mapped to the lane
+  function push(k, v) {
+    const c = CH[k];
+    c.raw = v;
+    if (!isFinite(v)) { buf[k][head] = 0; return; }
+    if (c.kind === 'emg') {
+      c.mean = isNaN(c.mean) ? v : c.mean + 0.01 * (v - c.mean);
+      const d = v - c.mean;
+      c.peak = Math.max(Math.abs(d), c.peak * 0.998, 1e-6);
+      buf[k][head] = d / c.peak;
+    } else {
+      c.peak = Math.max(v, c.peak * 0.998, 0.5);
+      buf[k][head] = 2 * v / c.peak - 1;
+    }
+  }
+  function advance() { head = (head + 1) % N; rows++; }
+
+  // ---- simulated demo (protocol cycle like gesture collection: PREP -> HOLD -> REST)
   const PH = [['PREP', 1.5, '--warn'], ['HOLD', 3, '--good'], ['REST', 2, '--dim']];
   let pi = 1, pT = 0, rep = 1;
-
   function gauss() { return Math.sqrt(-2 * Math.log(Math.random() + 1e-9)) * Math.cos(2 * Math.PI * Math.random()); }
-
-  function sample(dt) {
+  function simSample(dt) {
     t += dt; pT += dt;
     if (pT > PH[pi][1]) {
       pT = 0; pi = (pi + 1) % 3; if (pi === 0) rep = rep % 5 + 1;
       $('phase').textContent = PH[pi][0]; $('phase').style.color = `var(${PH[pi][2]})`;
-      $('phaseSub').textContent = `rep ${rep}/5`;
+      $('phaseSub').textContent = `rep ${rep}/5 - simulated demo`;
     }
     const active = PH[pi][0] === 'HOLD' ? 1 : 0.08;
     CH.forEach((c, k) => {
-      let y;
       if (c.kind === 'emg') {
         const env = active * (0.6 + 0.4 * Math.sin(t * 1.7 + c.phase)) + 0.05;
-        y = gauss() * env * 0.33;
+        push(k, 2048 + gauss() * env * 400);
       } else {
-        y = 0.6 * Math.sin(2 * Math.PI * c.f * t) + 0.25 * Math.sin(2 * Math.PI * c.f * 3.1 * t + k) + 0.03 * gauss();
+        push(k, Math.abs(1.5 * Math.sin(2 * Math.PI * c.f * t) + 0.5 * Math.sin(2 * Math.PI * c.f * 3.1 * t + k)) + 0.03 * Math.abs(gauss()));
       }
-      buf[k][head] = y;
     });
-    head = (head + 1) % N; rows++; bytes += 38;
+    advance();
   }
 
+  // ---- live rows from the rig: [t_ms, emg1..N, IMU1 acc xyz, gyro xyz, IMU2 acc xyz, gyro xyz]
+  function onLive(msg, nbytes) {
+    if (!msg || msg.v !== 1 || !Array.isArray(msg.rows)) return;
+    const ne = Number(msg.nemg);
+    if (!Number.isInteger(ne) || ne < 1 || ne > 12 || msg.rows.length > 200) return;
+    if (mode !== 'live' || CH.length !== ne + 2) {
+      mode = 'live'; setChannels(ne);
+      log(`LIVE: rig ${String(msg.rig).slice(0, 8)} streaming (${ne} EMG + 2 IMU, shown at ${Number(msg.fs) || 100} Hz)`);
+      $('phase').textContent = 'LIVE'; $('phase').style.color = 'var(--good)';
+    }
+    lastLive = Date.now(); bytes += nbytes;
+    liveInfo = { drops: msg.drops | 0, gaps: msg.gaps | 0, seq: msg.seq | 0, rig: String(msg.rig).slice(0, 8) };
+    setStatus();
+    $('phaseSub').textContent = `real data from the rig - packet ${liveInfo.seq}`;
+    if (!running) return;
+    for (const r of msg.rows) {
+      if (!Array.isArray(r) || r.length !== 1 + ne + 12) continue;
+      for (let i = 0; i < ne; i++) push(i, r[1 + i] === null ? NaN : Number(r[1 + i]));
+      const g1 = r.slice(1 + ne + 3, 1 + ne + 6).map(Number), g2 = r.slice(1 + ne + 9, 1 + ne + 12).map(Number);
+      push(ne, Math.hypot(...g1)); push(ne + 1, Math.hypot(...g2));
+      advance();
+    }
+  }
+
+  function goSim(reason) {
+    if (mode === 'sim') { setStatus(); return; }
+    mode = 'sim'; setChannels(3); log('rig offline -> simulated demo' + (reason ? ` (${reason})` : ''));
+    $('phase').textContent = PH[pi][0]; $('phase').style.color = `var(${PH[pi][2]})`;
+    setStatus();
+  }
+
+  function setStatus() {
+    const s = $('status');
+    let txt, col;
+    if (!running)                { txt = 'status: stopped (display paused)'; col = 'var(--warn)'; }
+    else if (mode === 'live')    { txt = 'status: LIVE - real signals from the rig'; col = 'var(--good)'; }
+    else if (bridge === 'idle')  { txt = 'status: bridge online, rig idle - simulated'; col = 'var(--warn)'; }
+    else                         { txt = 'status: rig offline - simulated demo'; col = 'var(--dim)'; }
+    $('plotTag').textContent = mode === 'live' ? 'LIVE' : 'SIMULATED';
+    $('plotTag').style.color = mode === 'live' ? 'var(--good)' : 'var(--warn)';
+    if (s._txt === txt) return;
+    s._txt = txt; s.style.color = col; type(s, txt);
+  }
+
+  // ---- MQTT (public broker: treat every message as untrusted, validate shape)
+  function connectBroker() {
+    if (!window.mqtt) { log('mqtt library failed to load - simulated only'); return; }
+    const cl = mqtt.connect(BROKER, {
+      clientId: 'web-' + Math.random().toString(16).slice(2, 10),
+      clean: true, reconnectPeriod: 5000, connectTimeout: 8000
+    });
+    cl.on('connect', () => { log('broker connected - waiting for the rig'); cl.subscribe([TOPIC + '/live', TOPIC + '/status']); });
+    cl.on('offline', () => log('broker offline - retrying'));
+    cl.on('error', e => log('broker error: ' + (e && e.message)));
+    cl.on('message', (topic, payload) => {
+      if (payload.length > 20000) return;
+      let msg; try { msg = JSON.parse(new TextDecoder().decode(payload)); } catch (e) { return; }
+      if (topic.endsWith('/status')) {
+        const st = String(msg && msg.state);
+        if (['streaming', 'idle', 'offline'].includes(st) && st !== bridge) {
+          bridge = st; log('bridge: ' + st);
+          if (st !== 'streaming') goSim(st); else setStatus();
+        }
+      } else onLive(msg, payload.length);
+    });
+  }
+  connectBroker();
+
+  // ---- drawing
+  const cv = $('plot'), ctx = cv.getContext('2d');
   function resize() {
     const r = cv.getBoundingClientRect(), dpr = Math.min(2, devicePixelRatio || 1);
     cv.width = Math.max(1, r.width * dpr); cv.height = Math.max(1, r.height * dpr);
@@ -429,7 +527,7 @@
     ctx.fillStyle = css('--bg'); ctx.fillRect(0, 0, W, H);
     ctx.strokeStyle = css('--grid'); ctx.lineWidth = 1; ctx.globalAlpha = theme === 'hacker' ? 0.5 : 1;
     ctx.beginPath();
-    for (let x = 0; x <= W; x += W / 10) { ctx.moveTo(x + .5, 0); ctx.lineTo(x + .5, H); }
+    for (let x = 0; x <= W; x += W / 6) { ctx.moveTo(x + .5, 0); ctx.lineTo(x + .5, H); }   // 1 s grid
     for (let k = 0; k <= CH.length; k++) { ctx.moveTo(0, k * lane + .5); ctx.lineTo(W, k * lane + .5); }
     ctx.stroke(); ctx.globalAlpha = 1;
     ctx.font = '11px ' + css('--font');
@@ -450,34 +548,41 @@
   let last = performance.now(), lastUi = 0;
   function frame(ts) {
     const dt = Math.min(0.05, (ts - last) / 1000); last = ts;
-    if (running) {
-      const n = Math.round(dt * 200);           // 200 drawn samples/s (display decimated from 1 kHz)
-      for (let i = 0; i < n; i++) sample(1 / 200);
-      draw();
+    if (mode === 'live' && Date.now() - lastLive > LIVE_TIMEOUT_MS) goSim('no data for 3 s');
+    if (running && mode === 'sim') {
+      const n = Math.round(dt * 100);
+      for (let i = 0; i < n; i++) simSample(1 / 100);
     }
+    if (running) draw();
     if (ts - lastUi > 120) {
       lastUi = ts;
-      CH.forEach((c, k) => { c.el.textContent = buf[k][(head - 1 + N) % N].toFixed(2); c.el.style.color = css(c.v); c.lbl.querySelector('span').style.color = css(c.v); });
-      $('diag').textContent = `diag: bytes ${bytes} | rows ${rows} | last: ${CH.map((c,k)=>buf[k][(head-1+N)%N].toFixed(3)).join(',')} | err: (none)`;
+      CH.forEach(c => {
+        c.el.textContent = isFinite(c.raw) ? (c.kind === 'emg' ? Math.round(c.raw) : c.raw.toFixed(2) + ' rad/s') : '--';
+        c.el.style.color = css(c.v); c.lbl.style.color = css(c.v);
+      });
+      const live = mode === 'live';
+      $('drops').textContent = live ? `drops: ${liveInfo.drops} | gaps: ${liveInfo.gaps}` : 'drops: - | gaps: -';
+      $('drops').style.color = live && (liveInfo.drops || liveInfo.gaps) ? 'var(--bad)' : live ? 'var(--good)' : 'var(--dim)';
+      $('diag').textContent = live
+        ? `diag: bytes ${bytes} | rows ${rows} | rig ${liveInfo.rig} | packet ${liveInfo.seq} | topic ${TOPIC}`
+        : `diag: simulated | bridge ${bridge} | topic ${TOPIC}`;
     }
     requestAnimationFrame(frame);
   }
-  for (let i = 0; i < N; i++) sample(1 / 200);
-  draw();
-  if (!reduce) requestAnimationFrame(frame); else { running = false; frame(performance.now()); }
+  for (let i = 0; i < N; i++) simSample(1 / 100);
+  if (reduce) running = false;
+  draw(); setStatus();
+  requestAnimationFrame(frame);
 
-  /* ---------- start / stop ---------- */
+  /* ---------- start / stop (pauses the display only) ---------- */
   function setRun(on) {
     running = on; $('btnStart').disabled = on; $('btnStop').disabled = !on;
-    const s = $('status');
-    s.style.color = on ? 'var(--good)' : 'var(--warn)';
-    type(s, on ? 'status: running ahmedltaief.github.io' : 'status: stopped ahmedltaief.github.io');
-    log(on ? 'stream started' : 'stream stopped');
+    setStatus(); log(on ? 'display resumed' : 'display paused');
     if (on) last = performance.now();
   }
   $('btnStart').onclick = () => setRun(true);
   $('btnStop').onclick = () => setRun(false);
-  if (reduce) { $('btnStart').disabled = true; $('btnStop').disabled = true; }
+  if (reduce) { $('btnStart').disabled = false; $('btnStop').disabled = true; }
 })();
 </script>
 </body>

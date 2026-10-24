@@ -11,7 +11,7 @@
       --bg: #000000; --panel: #050d05; --fg: #00ff40; --dim: #008c26;
       --accent: #99ff99; --warn: #ffbf00; --bad: #ff3333; --good: #00ff40;
       --btn: #001f08; --btn-hover: #003310; --field: #000f03; --grid: #00591a;
-      --border: #008c26; --tab: #000000; --tab-active: #050d05;
+      --border: #008c26; --tabtext: #00ff40; --plotbg: #000000;
       --c1: #00ff40; --c2: #00d9ff; --c3: #ffd900; --c4: #b3ff4d; --c5: #ff731a;
       --font: Consolas, "Cascadia Mono", "Courier New", monospace;
       --glow: 0 0 6px rgba(0, 255, 64, .45);
@@ -20,9 +20,9 @@
       --bg: #f0f0f0; --panel: #f0f0f0; --fg: #000000; --dim: #666666;
       --accent: #336699; --warn: #bf5900; --bad: #bf3333; --good: #1a7326;
       --btn: #fdfdfd; --btn-hover: #e5f1fb; --field: #ffffff; --grid: #d0d0d0;
-      --border: #b4b4b4; --tab: #e1e1e1; --tab-active: #f0f0f0;
+      --border: #b4b4b4; --tabtext: #000000; --plotbg: #ffffff;   /* MATLAB axes are white */
       --c1: #0072bd; --c2: #d95319; --c3: #77ac30; --c4: #7e2f8e; --c5: #4dbeee;
-      --font: "Segoe UI", Helvetica, Arial, sans-serif;
+      --font: Helvetica, Arial, sans-serif;   /* MATLAB uifigure default */
       --glow: none;
     }
 
@@ -30,9 +30,9 @@
     html, body { margin: 0; }
     body {
       background: var(--bg); color: var(--fg); font-family: var(--font);
-      font-size: 14px; line-height: 1.45; min-height: 100vh;
+      font-size: 13px; line-height: 1.35; min-height: 100vh;
     }
-    .window { max-width: 1280px; margin: 0 auto; padding: 8px; display: flex; flex-direction: column; gap: 4px; }
+    .window { max-width: 1540px; margin: 0 auto; padding: 8px; display: flex; flex-direction: column; gap: 4px; }
 
     /* hacker banner (gs_build_gui: root@teensy:~$ ...) */
     .banner { height: 26px; font-size: 14px; font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-shadow: var(--glow); }
@@ -53,9 +53,8 @@
     :root[data-theme="default"] select, :root[data-theme="default"] .field { border-radius: 3px; }
     button {
       background: var(--btn); border: 1px solid var(--border); height: 26px; padding: 0 12px;
-      cursor: pointer; border-radius: 0;
+      cursor: pointer; border-radius: 3px;
     }
-    :root[data-theme="default"] button { border-radius: 3px; }
     button:hover { background: var(--btn-hover); }
     button:focus-visible, select:focus-visible, a:focus-visible, .tab:focus-visible { outline: 1px dashed var(--accent); outline-offset: 2px; }
     button:disabled { opacity: .45; cursor: default; }
@@ -63,23 +62,29 @@
     .drops { font-weight: bold; color: var(--good); white-space: nowrap; }
 
     /* tab group */
-    .tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border); margin-top: 4px; overflow-x: auto; }
+    /* MATLAB uitabgroup: light grey strip in both themes (gs_style can't restyle it) */
+    .tabs { display: flex; background: #e6e6e6; border: 1px solid #b4b4b4; border-bottom: none; margin-top: 4px; overflow-x: auto; }
     .tab {
-      background: var(--tab); border: 1px solid var(--border); border-bottom: none; padding: 4px 14px;
-      height: auto; color: var(--dim); white-space: pre;
+      background: transparent; border: none; border-right: 1px solid #c8c8c8; border-radius: 0; padding: 3px 10px;
+      height: auto; color: var(--tabtext); white-space: pre;
     }
-    .tab[aria-selected="true"] { background: var(--tab-active); color: var(--fg); position: relative; top: 1px; font-weight: bold; }
-    .pane { display: none; padding: 6px 0; }
+    .tab:hover { background: #f2f2f2; }
+    .tab[aria-selected="true"] { background: #fafafa; }
+    .pane { display: none; padding: 6px; border: 1px solid #b4b4b4; }
     .pane.active { display: grid; }
 
     /* uipanel */
+    /* MATLAB uipanel: title on its own row with a rule under it */
     fieldset.panel {
-      background: var(--panel); border: 1px solid var(--border); margin: 0; padding: 8px 10px 10px; min-width: 0;
+      background: var(--panel); border: 1px solid var(--border); margin: 0; padding: 0 8px 8px; min-width: 0;
     }
-    :root[data-theme="default"] fieldset.panel { border-radius: 3px; }
-    legend { padding: 0 4px; font-size: 13px; font-weight: bold; }
+    fieldset.panel > legend {
+      float: left; width: calc(100% + 16px); margin: 0 -8px 8px; padding: 2px 4px;
+      border-bottom: 1px solid var(--border); font-size: 12px; font-weight: normal;
+    }
+    fieldset.panel > legend + * { clear: both; }
 
-    .two-col { grid-template-columns: 330px 1fr; gap: 8px; }
+    .two-col { grid-template-columns: 330px minmax(0, 1fr); gap: 8px; }   /* minmax: the canvas must not widen the column */
     .col { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
     .muted { color: var(--dim); }
     .accent { color: var(--accent); font-weight: bold; }
@@ -98,7 +103,7 @@
 
     /* live signal plot */
     .plot-wrap { position: relative; }
-    canvas { display: block; width: 100%; height: 300px; background: var(--bg); border: 1px solid var(--grid); }
+    canvas { display: block; width: 100%; height: 300px; background: var(--plotbg); border: 1px solid var(--grid); }
     .values { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; margin-top: 8px; }
     .values div { font-weight: bold; text-align: center; font-variant-numeric: tabular-nums; }
     .values span { display: block; font-size: 11px; font-weight: normal; }
@@ -125,14 +130,15 @@
 
     .log {
       background: var(--field); border: 1px solid var(--border); font-family: Consolas, "Courier New", monospace;
-      font-size: 11px; padding: 6px; height: 140px; overflow-y: auto; white-space: pre-wrap; color: var(--fg);
+      font-size: 11px; padding: 6px; height: 90px; overflow-y: auto; white-space: pre-wrap; color: var(--fg);
     }
+    .log.wide { grid-column: 1 / -1; }   /* full width under the panels, like the GUI log */
 
     a { color: var(--accent); }
-    .one-col { grid-template-columns: 1fr; gap: 8px; }
+    .one-col { grid-template-columns: minmax(0, 1fr); gap: 8px; }
 
     @media (max-width: 860px) {
-      .two-col { grid-template-columns: 1fr; }
+      .two-col { grid-template-columns: minmax(0, 1fr); }
       .cards { grid-template-columns: 1fr; }
       .card .name { min-height: 0; }
       .big { font-size: 32px; }
@@ -160,14 +166,15 @@
         <option value="contact">contact</option>
       </select>
       <button id="btnTheme" type="button" title="Switch theme">Theme: hacker</button>
+      <button id="btnApp" type="button" title="Open the Nidham phone app" onclick="location.href='app/'">App</button>
       <button id="btnStart" type="button" disabled>Resume</button>
       <button id="btnStop" type="button">Pause</button>
       <span class="status" id="status">status: connecting...</span>
-      <button id="btnLogin" type="button">Log in</button>
-      <span class="status" id="userLbl" style="color:var(--dim);font-weight:bold">user: none</span>
-      <select id="ddSubject" aria-label="Live subject" hidden><option value="">no live subject</option></select>
       <span class="grow"></span>
       <span class="drops" id="drops">drops: - | gaps: -</span>
+      <button id="btnLogin" type="button">Log in</button>
+      <span class="status" id="userLbl" style="color:var(--dim)">user: none</span>
+      <select id="ddSubject" aria-label="Live subject" hidden><option value="">no live subject</option></select>
     </div>
     <div class="diag" id="diag">diag: -</div>
   </div>
@@ -223,7 +230,6 @@
           <span class="muted">MCU:</span><span>Teensy</span>
         </div>
       </fieldset>
-      <div class="log" id="log" aria-label="Log"></div>
     </div>
 
     <div class="col">
@@ -245,6 +251,7 @@
         <div class="sub" id="phaseSub">live data is private - log in with your GUI / app account</div>
       </fieldset>
     </div>
+    <div class="log wide" id="log" aria-label="Log"></div>
   </section>
 
   <!-- ================= Projects ================= -->
@@ -276,6 +283,7 @@
     <fieldset class="panel" id="nidham">
       <legend>Nidham - EMG + IMU fatigue detection</legend>
       <p>Muscle-fatigue detection from surface EMG combined with IMU motion data, streamed from a 3-EMG + 2-IMU rig at 1000 Hz.</p>
+      <p><a href="app/">Open the Nidham app</a> - live EMG/IMU view and session history on your phone (same login as this site). On iPhone: open it in Safari, then Share &rarr; Add to Home Screen.</p>
     </fieldset>
 
     <fieldset class="panel">
@@ -330,6 +338,8 @@
   /* ---------- theme ---------- */
   let theme = 'hacker';
   try { theme = localStorage.getItem('theme') || 'hacker'; } catch (e) {}
+  const qTheme = new URLSearchParams(location.search).get('theme');   // ?theme=default / ?theme=hacker
+  if (qTheme === 'default' || qTheme === 'hacker') theme = qTheme;
   function applyTheme(t) {
     theme = t; root.dataset.theme = t;
     $('btnTheme').textContent = 'Theme: ' + t;
@@ -410,7 +420,7 @@
   let CH = [], buf = [], filled = 0, head = 0, rows = 0, bytes = 0, running = true;
   let mode = 'off', lastLive = 0, subject = '', watching = '', channel = null;
   let user = null, role = '', liveList = [];
-  let liveInfo = { drops: 0, gaps: 0, seq: 0, rig: '' };
+  let liveInfo = { drops: 0, gaps: 0, seq: 0, rig: '' }, delay = null;   // delay: s from MATLAB to this page
   const valuesEl = $('values');
 
   function setChannels(nemg) {
@@ -505,6 +515,10 @@
       log(`LIVE: subject ${subject} on rig ${String(msg.rig).slice(0, 8)} (${ne} EMG + 2 IMU, shown at ${Number(msg.fs) || 100} Hz)`);
     }
     lastLive = Date.now(); bytes += nbytes;
+    if (typeof msg.wall_ms === 'number') {
+      const d = (Date.now() - msg.wall_ms) / 1000;
+      if (d > -2 && d < 60) delay = delay === null ? d : delay * 0.8 + d * 0.2;   // else clocks disagree
+    }
     liveInfo = { drops: msg.drops | 0, gaps: msg.gaps | 0, seq: msg.seq | 0, rig: String(msg.rig).slice(0, 8) };
     setStatus(); showSubject();
     if (!running) return;
@@ -519,7 +533,7 @@
 
   function goOffline(reason) {
     if (mode === 'off') { setStatus(); showSubject(); return; }
-    mode = 'off'; log(`subject ${subject} stopped streaming` + (reason ? ` (${reason})` : ''));
+    mode = 'off'; delay = null; log(`subject ${subject} stopped streaming` + (reason ? ` (${reason})` : ''));
     subject = ''; setChannels(3);
     setStatus(); showSubject();
   }
@@ -622,7 +636,7 @@
 
   function draw() {
     const W = cv.clientWidth, H = cv.clientHeight, lane = H / CH.length;
-    ctx.fillStyle = css('--bg'); ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = css('--plotbg'); ctx.fillRect(0, 0, W, H);
     ctx.strokeStyle = css('--grid'); ctx.lineWidth = 1; ctx.globalAlpha = theme === 'hacker' ? 0.5 : 1;
     ctx.beginPath();
     for (let x = 0; x <= W; x += W / 6) { ctx.moveTo(x + .5, 0); ctx.lineTo(x + .5, H); }   // 1 s grid
@@ -666,7 +680,7 @@
       $('drops').textContent = live ? `drops: ${liveInfo.drops} | gaps: ${liveInfo.gaps}` : 'drops: - | gaps: -';
       $('drops').style.color = live && (liveInfo.drops || liveInfo.gaps) ? 'var(--bad)' : live ? 'var(--good)' : 'var(--dim)';
       $('diag').textContent = live
-        ? `diag: subject ${subject} | bytes ${bytes} | rows ${rows} | rig ${liveInfo.rig} | packet ${liveInfo.seq}`
+        ? `diag: subject ${subject} | delay ${delay === null ? '-' : Math.max(0, delay).toFixed(1) + ' s'} | bytes ${bytes} | rows ${rows} | rig ${liveInfo.rig} | packet ${liveInfo.seq}`
         : `diag: no data | ${user ? 'live subjects: ' + (liveList.join(', ') || 'none') : 'logged out'}`;
     }
     requestAnimationFrame(frame);

@@ -578,6 +578,7 @@
     if (user) {
       const { data } = await sb.from('profiles').select('role').eq('id', user.id).maybeSingle();
       role = (data && data.role) || 'subject';
+      sb.rpc('close_stale_sessions').then(() => {}, () => {});   // close sessions left open by a crash
       log(`logged in: ${user.email} (${role})`);
       $('loginPanel').hidden = true;
       pollSessions();

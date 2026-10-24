@@ -457,7 +457,7 @@
   function placeholder() {
     if (!sb) return 'BACKEND NOT CONFIGURED';
     if (!user) return 'LOG IN TO SEE LIVE DATA';
-    return 'NO DATA - nobody is streaming';
+    return watching ? `NO DATA - waiting for ${watching}` : 'NO DATA - pick a subject';
   }
 
   function showUser() {
@@ -477,7 +477,7 @@
     $('phaseSub').textContent = live ? `streaming now - packet ${liveInfo.seq}`
       : !sb ? 'backend not configured'
       : !user ? 'live data is private - log in with your GUI / app account'
-      : liveList.length ? 'pick a subject in the top bar' : 'nobody is streaming right now';
+      : watching ? `waiting for ${watching} to start streaming` : liveList.length ? 'pick a subject in the top bar' : 'nobody is streaming right now - pick a subject to wait for';
   }
 
   function setStatus() {
@@ -541,19 +541,33 @@
   }
 
   // ---- who is streaming right now (RLS: staff see all, a subject only their own)
+  // ---- subjects you may watch + who is streaming right now
+  // (RLS: staff see every subject, a subject only their own). You can wait on a
+  // subject's channel before their session starts - data appears when it does.
+  let ddSig = '';
   async function pollSessions() {
     if (!sb || !user) return;
     const since = new Date(Date.now() - SESSION_FRESH_MS).toISOString();
-    const { data, error } = await sb.from('sessions').select('id,subject_id,rig,source,last_seen')
-      .is('ended_at', null).gt('last_seen', since).order('subject_id');
-    if (error) { log('sessions: ' + error.message); return; }
-    liveList = [...new Set(data.map(r => r.subject_id).filter(s => SUBJECT_RE.test(s)))];
-    const dd = $('ddSubject'), keep = watching;
-    dd.innerHTML = '<option value="">' + (liveList.length ? 'subject...' : 'no live subject') + '</option>' +
-      liveList.map(s => `<option value="${s}">${s} (live)</option>`).join('');
-    if (keep && !liveList.includes(keep)) dd.insertAdjacentHTML('beforeend', `<option value="${keep}">${keep}</option>`);
-    dd.value = keep;
-    if (!watching && liveList.length === 1) { dd.value = liveList[0]; watch(liveList[0]); }
+    const [subs, live] = await Promise.all([
+      sb.from('subjects').select('id').order('id'),
+      sb.from('sessions').select('subject_id').is('ended_at', null).gt('last_seen', since)
+    ]);
+    if (subs.error || live.error) { log('subjects/sessions: ' + (subs.error || live.error).message); return; }
+    liveList = [...new Set(live.data.map(r => r.subject_id).filter(s => SUBJECT_RE.test(s)))];
+    const all = [...new Set([...subs.data.map(r => r.id), ...liveList, ...(watching ? [watching] : [])])]
+      .filter(s => SUBJECT_RE.test(s)).sort();
+    const sig = all.join() + '|' + liveList.join();
+    if (sig !== ddSig) {                 // rebuild only on change, so an open picker isn't reset
+      ddSig = sig;
+      const dd = $('ddSubject');
+      dd.innerHTML = '<option value="">' + (all.length ? 'subject...' : 'no subjects yet') + '</option>' +
+        all.map(s => `<option value="${s}">${s}${liveList.includes(s) ? ' (live)' : ''}</option>`).join('');
+      dd.value = watching;
+    }
+    if (!watching) {
+      const pick = liveList.length === 1 ? liveList[0] : (role === 'subject' && all.length === 1 ? all[0] : '');
+      if (pick) { $('ddSubject').value = pick; watch(pick); }
+    }
     showSubject();
   }
   $('ddSubject').onchange = e => watch(e.target.value);
@@ -568,7 +582,7 @@
       $('loginPanel').hidden = true;
       pollSessions();
     } else {
-      await watch(''); liveList = [];
+      await watch(''); liveList = []; ddSig = '';
     }
     setStatus(); showSubject();
   }

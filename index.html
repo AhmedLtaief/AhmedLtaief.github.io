@@ -522,6 +522,13 @@
     liveInfo = { drops: msg.drops | 0, gaps: msg.gaps | 0, seq: msg.seq | 0, rig: String(msg.rig).slice(0, 8) };
     setStatus(); showSubject();
     if (!running) return;
+    // firmware with USE_IMU2 = false (1-IMU rig) streams IMU2 as exact zeros
+    const imu2Off = msg.rows.length > 0 && msg.rows.every(r => Array.isArray(r) && r.slice(1 + ne + 6, 1 + ne + 12).every(v => v === 0));
+    const c2 = CH[ne + 1];
+    if (c2 && c2.off !== imu2Off) {
+      c2.off = imu2Off; c2.name = imu2Off ? 'IMU2 (not connected)' : 'IMU2 |gyro|'; c2.lbl.textContent = c2.name;
+      if (imu2Off) log('IMU2 sends only zeros - shown as not connected (1-IMU rig)');
+    }
     for (const r of msg.rows) {
       if (!Array.isArray(r) || r.length !== 1 + ne + 12) continue;
       for (let i = 0; i < ne; i++) push(i, r[1 + i] === null ? NaN : Number(r[1 + i]));
@@ -673,7 +680,7 @@
     if (ts - lastUi > 120) {
       lastUi = ts;
       CH.forEach(c => {
-        c.el.textContent = isFinite(c.raw) ? (c.kind === 'emg' ? Math.round(c.raw) : c.raw.toFixed(2) + ' rad/s') : '--';
+        c.el.textContent = c.off ? 'off' : isFinite(c.raw) ? (c.kind === 'emg' ? Math.round(c.raw) : c.raw.toFixed(2) + ' rad/s') : '--';
         c.el.style.color = css(c.v); c.lbl.style.color = css(c.v);
       });
       const live = mode === 'live';

@@ -437,7 +437,7 @@
     for (let i = 0; i < nemg; i++) CH.push({ name: 'EMG' + (i + 1), kind: 'emg' });
     CH.push({ name: 'IMU1 |gyro|', kind: 'imu' });
     CH.push({ name: 'IMU2 |gyro|', kind: 'imu' });
-    CH.forEach((c, k) => { c.v = COLS[k % COLS.length]; c.mean = NaN; c.peak = 1e-6; c.raw = NaN; });
+    CH.forEach((c, k) => { c.v = COLS[k % COLS.length]; c.mean = NaN; c.peak = 1e-6; c.raw = NaN; c.bias = null; c.moving = 0; });
     buf = CH.map(() => new Float32Array(N)); head = 0; filled = 0;
     valuesEl.style.gridTemplateColumns = `repeat(${Math.min(CH.length, 5)}, 1fr)`;
     valuesEl.innerHTML = '';
@@ -450,7 +450,8 @@
   setChannels(3);
 
   // display scaling per channel: EMG = remove running mean, divide by decaying peak;
-  // IMU |gyro| = 0..peak mapped to the lane
+  // IMU |gyro| = 0..peak mapped to the lane, peak never below GYRO_FLOOR so a
+  // still IMU stays a flat line at the bottom instead of creeping up
   function push(k, v) {
     const c = CH[k];
     c.raw = v;
@@ -461,9 +462,22 @@
       c.peak = Math.max(Math.abs(d), c.peak * 0.998, 1e-6);
       buf[k][head] = d / c.peak;
     } else {
-      c.peak = Math.max(v, c.peak * 0.998, 0.5);
+      c.peak = Math.max(v, c.peak * 0.998, GYRO_FLOOR);
       buf[k][head] = 2 * v / c.peak - 1;
     }
+  }
+  // the firmware leaves a gyro offset (~0.2-1 rad/s, drifts while warming up):
+  // follow it per axis while the IMU is still, plot |gyro - offset|
+  const GYRO_FLOOR = 3, GYRO_STILL = 0.5, GYRO_TAU = 1000;   // rad/s, rad/s, samples (10 s)
+  function pushGyro(k, g) {
+    const c = CH[k];
+    if (!g.every(isFinite)) { push(k, NaN); return; }
+    if (!c.bias) { c.bias = g.slice(); c.moving = 0; }
+    const d = g.map((v, i) => v - c.bias[i]), m = Math.hypot(...d);
+    c.moving = m < GYRO_STILL ? 0 : c.moving + 1;
+    if (c.moving > 500) { c.bias = g.slice(); c.moving = 0; }       // 5 s "moving" = wrong start offset
+    else if (m < GYRO_STILL) c.bias = c.bias.map((b, i) => b + d[i] / GYRO_TAU);
+    push(k, m);
   }
   function advance() { head = (head + 1) % N; rows++; filled = Math.min(N, filled + 1); }
 
@@ -543,7 +557,7 @@
       if (!Array.isArray(r) || r.length !== 1 + ne + 12) continue;
       for (let i = 0; i < ne; i++) push(i, r[1 + i] === null ? NaN : Number(r[1 + i]));
       const g1 = r.slice(1 + ne + 3, 1 + ne + 6).map(Number), g2 = r.slice(1 + ne + 9, 1 + ne + 12).map(Number);
-      push(ne, Math.hypot(...g1)); push(ne + 1, Math.hypot(...g2));
+      pushGyro(ne, g1); pushGyro(ne + 1, g2);
       advance();
     }
   }

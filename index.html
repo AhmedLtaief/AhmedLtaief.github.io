@@ -94,6 +94,14 @@
       color: var(--fg); text-shadow: var(--glow); word-break: break-word;
     }
     .sub { text-align: center; color: var(--dim); min-height: 22px; }
+    /* sentence of a decoded gesture (MATLAB Commands tab, Run) */
+    .big.said { color: var(--good); }
+    .big.said.long { font-size: 30px; }
+    .big.flash { animation: flash .6s ease-out; }
+    @keyframes flash { from { opacity: .25; transform: scale(.97); } to { opacity: 1; transform: none; } }
+    @media (prefers-reduced-motion: reduce) { .big.flash { animation: none; } }
+    .sayopt { display: flex; justify-content: center; align-items: center; gap: 8px; margin-top: 6px; font-size: 13px; }
+    .sayopt[hidden] { display: none; }
 
     .checks label { display: flex; align-items: center; gap: 8px; padding: 2px 0; }
     .checks input { accent-color: var(--fg); margin: 0; }
@@ -234,9 +242,10 @@
 
     <div class="col">
       <fieldset class="panel">
-        <legend>Attempt</legend>
-        <h1 class="big" id="bigName">SIDI AHMED HAMMOUDA</h1>
+        <legend id="attemptTag">Attempt</legend>
+        <h1 class="big" id="bigName" aria-live="polite">SIDI AHMED HAMMOUDA</h1>
         <div class="sub" id="subLine">Electrical engineering student - AI, embedded systems, computer vision.</div>
+        <label class="sayopt muted" id="sayOpt" hidden><input type="checkbox" id="cbSpeak"> read sentences aloud</label>
       </fieldset>
       <fieldset class="panel">
         <legend>EMG(3) + IMU(2) - <span id="plotTag" style="color:var(--dim)">NO DATA</span></legend>
@@ -478,6 +487,7 @@
     $('btnLogin').textContent = user ? 'Log out' : 'Log in';
     $('btnLogin').disabled = !sb;
     $('ddSubject').hidden = !user;
+    $('sayOpt').hidden = !user;
   }
 
   function showSubject() {
@@ -538,7 +548,37 @@
     }
   }
 
+  // ---- sentence of a decoded gesture: {v, subject, gesture: 'UP' | 'TWIST_CW@hanging', text, wall_ms}
+  const NAME0 = $('bigName').textContent, SUB0 = $('subLine').textContent;
+  const GESTURE_RE = /^[A-Za-z0-9_@]{1,40}$/;
+  const GLABEL = { UP: 'flick up', DOWN: 'flick down', LEFT: 'flick left', RIGHT: 'flick right',
+                   TWIST_CW: 'twist clockwise', TWIST_CCW: 'twist anticlockwise' };
+  function gestureLabel(g) {
+    const [k, pos] = g.split('@');
+    return (GLABEL[k] || k.toLowerCase().replace(/_/g, ' ')) + (pos ? ' - hand ' + pos.replace(/_/g, ' ') : '');
+  }
+  function onSay(msg) {
+    if (!msg || msg.v !== 1 || msg.subject !== watching || typeof msg.gesture !== 'string' || !GESTURE_RE.test(msg.gesture)) return;
+    const text = typeof msg.text === 'string' ? msg.text.replace(/\s+/g, ' ').trim().slice(0, 200) : '';
+    if (!text) return;
+    const t = new Date(), b = $('bigName');
+    b.classList.add('said'); b.classList.toggle('long', text.length > 24);
+    b.classList.remove('flash'); void b.offsetWidth; b.classList.add('flash');   // restart the animation
+    type(b, text);
+    $('subLine').textContent = `${gestureLabel(msg.gesture)} - ${msg.subject} - ${pad(t.getHours())}:${pad(t.getMinutes())}:${pad(t.getSeconds())}`;
+    $('attemptTag').textContent = 'Sentence - ' + msg.subject;
+    log(`${msg.subject}: "${text}" (${gestureLabel(msg.gesture)})`);
+    if ($('cbSpeak').checked && 'speechSynthesis' in window) {
+      speechSynthesis.cancel(); speechSynthesis.speak(new SpeechSynthesisUtterance(text));
+    }
+  }
+  function clearSay() {
+    const b = $('bigName'); b.classList.remove('said', 'long', 'flash');
+    b.textContent = NAME0; $('subLine').textContent = SUB0; $('attemptTag').textContent = 'Attempt';
+  }
+
   function goOffline(reason) {
+    clearSay();
     if (mode === 'off') { setStatus(); showSubject(); return; }
     mode = 'off'; delay = null; log(`subject ${subject} stopped streaming` + (reason ? ` (${reason})` : ''));
     subject = ''; setChannels(3);
@@ -555,6 +595,7 @@
     sb.realtime.setAuth(data.session && data.session.access_token);
     channel = sb.channel('live:' + sid, { config: { private: true } })
       .on('broadcast', { event: 'rows' }, m => onLive(m.payload, JSON.stringify(m.payload).length))
+      .on('broadcast', { event: 'say' }, m => onSay(m.payload))
       .subscribe((st, err) => {
         if (st === 'SUBSCRIBED') log(`watching live:${sid}`);
         else if (st === 'CHANNEL_ERROR') log(`live:${sid} refused` + (err ? ': ' + err.message : ''));

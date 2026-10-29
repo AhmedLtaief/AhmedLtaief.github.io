@@ -240,7 +240,7 @@
         <legend>Rig</legend>
         <div class="kv">
           <span class="muted">EMG:</span><span>3 channels</span>
-          <span class="muted">IMU:</span><span>2 units</span>
+          <span class="muted">IMU:</span><span>1 unit (2nd planned)</span>
           <span class="muted">fs:</span><span>1000 Hz</span>
           <span class="muted">MCU:</span><span>Teensy</span>
         </div>
@@ -594,7 +594,9 @@
     if (!msg || msg.v !== 1 || msg.subject !== watching || typeof msg.gesture !== 'string' || !GESTURE_RE.test(msg.gesture)) return;
     const text = typeof msg.text === 'string' ? msg.text.replace(/\s+/g, ' ').trim().slice(0, 200) : '';
     if (!text) return;
-    const t = new Date(), b = $('sayBig');
+    // MATLAB's clock, so the website and the phone show the same time; arrival time if missing or absurd
+    const w = msg.wall_ms, ok = typeof w === 'number' && Math.abs(Date.now() - w) < 3600e3;
+    const t = ok ? new Date(w) : new Date(), b = $('sayBig');
     said.unshift({ t: hms(t), text, gesture: msg.gesture }); said = said.slice(0, SAY_KEEP);
     b.classList.remove('waiting', 'flash'); b.classList.toggle('long', text.length > 24);
     void b.offsetWidth; b.classList.add('flash');   // restart the animation

@@ -95,13 +95,20 @@
     }
     .sub { text-align: center; color: var(--dim); min-height: 22px; }
     /* sentence of a decoded gesture (MATLAB Commands tab, Run) */
+    .panel[hidden] { display: none; }
     .big.said { color: var(--good); }
     .big.said.long { font-size: 30px; }
+    .big.waiting { color: var(--dim); font-size: 26px; text-shadow: none; }
     .big.flash { animation: flash .6s ease-out; }
     @keyframes flash { from { opacity: .25; transform: scale(.97); } to { opacity: 1; transform: none; } }
     @media (prefers-reduced-motion: reduce) { .big.flash { animation: none; } }
-    .sayopt { display: flex; justify-content: center; align-items: center; gap: 8px; margin-top: 6px; font-size: 13px; }
-    .sayopt[hidden] { display: none; }
+    .sayopt { display: flex; justify-content: center; align-items: center; flex-wrap: wrap; gap: 8px 14px; margin-top: 8px; font-size: 13px; }
+    .sayopt label { display: flex; align-items: center; gap: 6px; }
+    .sayhist { list-style: none; margin: 8px 0 0; padding: 6px 0 0; border-top: 1px solid var(--grid);
+               max-height: 150px; overflow-y: auto; font-size: 14px; }
+    .sayhist:empty { display: none; }
+    .sayhist li { display: flex; gap: 10px; padding: 2px 0; }
+    .sayhist .t { color: var(--dim); font-variant-numeric: tabular-nums; flex: none; }
 
     .checks label { display: flex; align-items: center; gap: 8px; padding: 2px 0; }
     .checks input { accent-color: var(--fg); margin: 0; }
@@ -242,10 +249,21 @@
 
     <div class="col">
       <fieldset class="panel">
-        <legend id="attemptTag">Attempt</legend>
-        <h1 class="big" id="bigName" aria-live="polite">SIDI AHMED HAMMOUDA</h1>
+        <legend>Attempt</legend>
+        <h1 class="big" id="bigName">SIDI AHMED HAMMOUDA</h1>
         <div class="sub" id="subLine">Electrical engineering student - AI, embedded systems, computer vision.</div>
-        <label class="sayopt muted" id="sayOpt" hidden><input type="checkbox" id="cbSpeak"> read sentences aloud</label>
+      </fieldset>
+      <!-- text of the gestures done in MATLAB (Commands tab, Run): newest big, earlier ones below -->
+      <fieldset class="panel" id="sayPanel" hidden>
+        <legend>Gestured text - <span id="sayTag" style="color:var(--dim)">waiting</span></legend>
+        <div class="big said waiting" id="sayBig" aria-live="polite">no gesture yet</div>
+        <div class="sub" id="saySub">pick a subject, then do a gesture in MATLAB (Commands tab, Run)</div>
+        <ol class="sayhist" id="sayHist" aria-label="Earlier gestured text"></ol>
+        <div class="sayopt muted">
+          <label><input type="checkbox" id="cbSpeak"> read aloud</label>
+          <button type="button" id="btnSayCopy">Copy all</button>
+          <button type="button" id="btnSayClear">Clear</button>
+        </div>
       </fieldset>
       <fieldset class="panel">
         <legend>EMG(3) + IMU(2) - <span id="plotTag" style="color:var(--dim)">NO DATA</span></legend>
@@ -501,7 +519,7 @@
     $('btnLogin').textContent = user ? 'Log out' : 'Log in';
     $('btnLogin').disabled = !sb;
     $('ddSubject').hidden = !user;
-    $('sayOpt').hidden = !user;
+    $('sayPanel').hidden = !user;
   }
 
   function showSubject() {
@@ -563,7 +581,8 @@
   }
 
   // ---- sentence of a decoded gesture: {v, subject, gesture: 'UP' | 'TWIST_CW@hanging', text, wall_ms}
-  const NAME0 = $('bigName').textContent, SUB0 = $('subLine').textContent;
+  const SAY_KEEP = 20;
+  let said = [];                         // [{t, text, gesture}] newest first, this subject only
   const GESTURE_RE = /^[A-Za-z0-9_@]{1,40}$/;
   const GLABEL = { UP: 'flick up', DOWN: 'flick down', LEFT: 'flick left', RIGHT: 'flick right',
                    TWIST_CW: 'twist clockwise', TWIST_CCW: 'twist anticlockwise' };
@@ -575,24 +594,45 @@
     if (!msg || msg.v !== 1 || msg.subject !== watching || typeof msg.gesture !== 'string' || !GESTURE_RE.test(msg.gesture)) return;
     const text = typeof msg.text === 'string' ? msg.text.replace(/\s+/g, ' ').trim().slice(0, 200) : '';
     if (!text) return;
-    const t = new Date(), b = $('bigName');
-    b.classList.add('said'); b.classList.toggle('long', text.length > 24);
-    b.classList.remove('flash'); void b.offsetWidth; b.classList.add('flash');   // restart the animation
+    const t = new Date(), b = $('sayBig');
+    said.unshift({ t: hms(t), text, gesture: msg.gesture }); said = said.slice(0, SAY_KEEP);
+    b.classList.remove('waiting', 'flash'); b.classList.toggle('long', text.length > 24);
+    void b.offsetWidth; b.classList.add('flash');   // restart the animation
     type(b, text);
-    $('subLine').textContent = `${gestureLabel(msg.gesture)} - ${msg.subject} - ${pad(t.getHours())}:${pad(t.getMinutes())}:${pad(t.getSeconds())}`;
-    $('attemptTag').textContent = 'Sentence - ' + msg.subject;
+    $('saySub').textContent = `${gestureLabel(msg.gesture)} - ${hms(t)}`;
+    $('sayTag').textContent = msg.subject; $('sayTag').style.color = 'var(--good)';
+    showSayHist();
     log(`${msg.subject}: "${text}" (${gestureLabel(msg.gesture)})`);
     if ($('cbSpeak').checked && 'speechSynthesis' in window) {
       speechSynthesis.cancel(); speechSynthesis.speak(new SpeechSynthesisUtterance(text));
     }
   }
-  function clearSay() {
-    const b = $('bigName'); b.classList.remove('said', 'long', 'flash');
-    b.textContent = NAME0; $('subLine').textContent = SUB0; $('attemptTag').textContent = 'Attempt';
+  function hms(t) { return `${pad(t.getHours())}:${pad(t.getMinutes())}:${pad(t.getSeconds())}`; }
+  function showSayHist() {                // earlier ones (not the newest, it is shown big)
+    const ol = $('sayHist'); ol.innerHTML = '';
+    for (const s of said.slice(1)) {
+      const li = document.createElement('li'), a = document.createElement('span'), b = document.createElement('span');
+      a.className = 't'; a.textContent = s.t; b.textContent = s.text; b.title = gestureLabel(s.gesture);
+      li.append(a, b); ol.appendChild(li);
+    }
   }
+  function clearSay() {
+    said = []; showSayHist();
+    const b = $('sayBig'); b.classList.remove('long', 'flash'); b.classList.add('waiting');
+    b.textContent = 'no gesture yet';
+    $('saySub').textContent = watching ? `do a gesture in MATLAB (Commands tab, Run) - showing ${watching}`
+                                       : 'pick a subject, then do a gesture in MATLAB (Commands tab, Run)';
+    $('sayTag').textContent = watching || 'waiting'; $('sayTag').style.color = 'var(--dim)';
+  }
+  $('btnSayClear').onclick = () => { clearSay(); log('gestured text cleared'); };
+  $('btnSayCopy').onclick = async () => {
+    const txt = said.slice().reverse().map(s => `${s.t}  ${s.text}`).join('\n');
+    if (!txt) { log('nothing to copy yet'); return; }
+    try { await navigator.clipboard.writeText(txt); log(`copied ${said.length} sentence(s)`); }
+    catch (e) { log('copy blocked by the browser'); }
+  };
 
   function goOffline(reason) {
-    clearSay();
     if (mode === 'off') { setStatus(); showSubject(); return; }
     mode = 'off'; delay = null; log(`subject ${subject} stopped streaming` + (reason ? ` (${reason})` : ''));
     subject = ''; setChannels(3);
@@ -603,7 +643,7 @@
   async function watch(sid) {
     if (sid === watching) return;
     if (channel) { await sb.removeChannel(channel); channel = null; }
-    watching = sid; goOffline(); setStatus();
+    watching = sid; goOffline(); clearSay(); setStatus();
     if (!sid) return;
     const { data } = await sb.auth.getSession();
     sb.realtime.setAuth(data.session && data.session.access_token);

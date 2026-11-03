@@ -586,9 +586,11 @@
   const GESTURE_RE = /^[A-Za-z0-9_@]{1,40}$/;
   const GLABEL = { UP: 'flick up', DOWN: 'flick down', LEFT: 'flick left', RIGHT: 'flick right',
                    TWIST_CW: 'twist clockwise', TWIST_CCW: 'twist anticlockwise' };
-  function gestureLabel(g) {
-    const [k, pos] = g.split('@');
-    return (GLABEL[k] || k.toLowerCase().replace(/_/g, ' ')) + (pos ? ' - hand ' + pos.replace(/_/g, ' ') : '');
+  function gestureLabel(g) {             // 'FIST_UP@hanging' -> 'fist + flick up - hand hanging'
+    let [k, pos] = g.split('@');
+    const fist = k.startsWith('FIST_'); if (fist) k = k.slice(5);
+    const base = GLABEL[k] || k.toLowerCase().replace(/_/g, ' ');
+    return (fist ? 'fist + ' : '') + base + (pos ? ' - hand ' + pos.replace(/_/g, ' ') : '');
   }
   function onSay(msg) {
     if (!msg || msg.v !== 1 || msg.subject !== watching || typeof msg.gesture !== 'string' || !GESTURE_RE.test(msg.gesture)) return;

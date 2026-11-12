@@ -83,6 +83,12 @@
       border-bottom: 1px solid var(--border); font-size: 12px; font-weight: normal;
     }
     fieldset.panel > legend + * { clear: both; }
+    /* remote control pad (sends to the Nidham Remote helper on your PC) */
+    .rkeys { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin: 6px 0; }
+    .rkeys button { padding: 10px 0; }
+    .rpad { height: 170px; border: 1px dashed var(--dim); border-radius: 6px; touch-action: none; user-select: none;
+            display: flex; align-items: center; justify-content: center; color: var(--dim); font-size: 12px; margin: 6px 0; }
+    .rpad.on { border-style: solid; }
 
     .two-col { grid-template-columns: 330px minmax(0, 1fr); gap: 8px; }   /* minmax: the canvas must not widen the column */
     .col { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
@@ -182,6 +188,7 @@
       </select>
       <button id="btnTheme" type="button" title="Switch theme">Theme: hacker</button>
       <button id="btnApp" type="button" title="Open the Nidham phone app" onclick="location.href='app/'">App</button>
+      <button id="btnUsb" type="button">USB rig</button>
       <button id="btnStart" type="button" disabled>Resume</button>
       <button id="btnStop" type="button">Pause</button>
       <span class="status" id="status">status: connecting...</span>
@@ -190,6 +197,7 @@
       <button id="btnLogin" type="button">Log in</button>
       <span class="status" id="userLbl" style="color:var(--dim)">user: none</span>
       <select id="ddSubject" aria-label="Live subject" hidden><option value="">no live subject</option></select>
+      <label id="shareLbl" hidden title="Send this USB stream to the subject's private live channel (phone app / other screens)"><input type="checkbox" id="cbShare"> share live</label>
     </div>
     <div class="diag" id="diag">diag: -</div>
   </div>
@@ -277,6 +285,33 @@
         <div class="phase" id="phase" style="color:var(--dim)">LOG IN</div>
         <div class="sub" id="phaseSub">live data is private - log in with your GUI / app account</div>
       </fieldset>
+      <fieldset class="panel" id="remotePanel" hidden>
+        <legend>Remote control - your PC</legend>
+        <div class="sub">Controls any PC where <b>Nidham Remote</b> runs, signed in to this same account. Only your account can reach it.</div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:6px">
+          <button type="button" id="btnRemote">Connect</button>
+          <span class="status" id="remoteSt" style="color:var(--dim)">off</span>
+        </div>
+        <div class="sub" style="margin-top:8px"><b>Gestures from the USB rig</b> (Chrome / Edge on a computer): plug the rig in,
+          press <b>USB rig</b> at the top, load the model saved by the desktop app (Commands tab &rarr; Save model for the website).</div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:6px 0">
+          <label class="muted" style="cursor:pointer"><input type="file" id="fModel" accept=".ndm" hidden><span class="btnlike" style="border:1px solid var(--dim);padding:4px 8px;border-radius:4px">Load model</span></label>
+          <label><input type="checkbox" id="cbGest"> send my gestures to my PC</label>
+          <span class="status" id="gestSt" style="color:var(--dim)">no model</span>
+        </div>
+        <div class="big said waiting" id="gestBig" style="font-size:22px">no gesture yet</div>
+        <div class="rpad" id="rPad" aria-label="Touchpad: drag to move the cursor, tap to click">drag = move cursor &middot; tap = click</div>
+        <div class="rkeys">
+          <button type="button" data-k="ESCAPE">Esc</button><button type="button" data-k="UP">&uarr;</button>
+          <button type="button" data-k="BACK_SPACE">&#9003;</button><button type="button" data-k="TAB">Tab</button>
+          <button type="button" data-k="LEFT">&larr;</button><button type="button" data-k="DOWN">&darr;</button>
+          <button type="button" data-k="RIGHT">&rarr;</button><button type="button" data-k="ENTER">Enter</button>
+          <button type="button" data-c="left">L click</button><button type="button" data-c="right">R click</button>
+          <button type="button" data-s="3">scroll &uarr;</button><button type="button" data-s="-3">scroll &darr;</button>
+          <button type="button" data-k="SPACE">Space</button><button type="button" data-k="PAGE_UP">PgUp</button>
+          <button type="button" data-k="PAGE_DOWN">PgDn</button><button type="button" data-k="DELETE">Del</button>
+        </div>
+      </fieldset>
     </div>
     <div class="log wide" id="log" aria-label="Log"></div>
   </section>
@@ -356,6 +391,7 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.2/dist/umd/supabase.min.js"></script>
+<script src="nidham_decoder.js"></script>
 <script>
 (() => {
   const $ = id => document.getElementById(id);
@@ -447,6 +483,7 @@
   let CH = [], buf = [], filled = 0, head = 0, rows = 0, bytes = 0, running = true;
   let mode = 'off', lastLive = 0, subject = '', watching = '', channel = null;
   let user = null, role = '', liveList = [];
+  let usb = null, share = null;          // Teensy on this computer's USB (Web Serial) / its stream sent to the channel
   let liveInfo = { drops: 0, gaps: 0, seq: 0, rig: '' }, delay = null;   // delay: s from MATLAB to this page
   const valuesEl = $('values');
 
@@ -506,8 +543,9 @@
   else if (!sb) log('supabase library failed to load');
 
   function placeholder() {
+    if (mode === 'usb') return 'USB: waiting for the Teensy...';
     if (!sb) return 'BACKEND NOT CONFIGURED';
-    if (!user) return 'LOG IN TO SEE LIVE DATA';
+    if (!user) return 'LOG IN TO SEE LIVE DATA (or USB rig)';
     return watching ? `NO DATA - waiting for ${watching}` : 'NO DATA - pick a subject';
   }
 
@@ -520,9 +558,17 @@
     $('btnLogin').disabled = !sb;
     $('ddSubject').hidden = !user;
     $('sayPanel').hidden = !user;
+    $('shareLbl').hidden = !(user && mode === 'usb');
   }
 
   function showSubject() {
+    if (mode === 'usb') {
+      $('phase').textContent = 'USB'; $('phase').style.color = 'var(--good)';
+      $('phaseSub').textContent = share ? `this computer's Teensy - shared live as ${share.subj}`
+        : user ? "this computer's Teensy - pick a subject + tick 'share live' to send it to the phone app"
+        : "this computer's Teensy - only on this screen";
+      return;
+    }
     const live = mode === 'live';
     $('phase').textContent = live ? subject : (user ? 'NO DATA' : 'LOG IN');
     $('phase').style.color = live ? 'var(--good)' : 'var(--dim)';
@@ -535,13 +581,19 @@
   function setStatus() {
     const s = $('status');
     let txt, col;
-    if (mode === 'live')  { txt = `status: LIVE - subject ${subject}` + (running ? '' : ' (display paused)'); col = running ? 'var(--good)' : 'var(--warn)'; }
+    if (mode === 'usb') {
+      const stale = !usb || Date.now() - usb.lastRx > LIVE_TIMEOUT_MS;
+      txt = stale ? 'status: USB - no data from the Teensy' : `status: USB rig ${usb.fs ? usb.fs + ' Hz' : ''}` +
+        (share ? ` - shared as ${share.subj}` : '') + (running ? '' : ' (display paused)');
+      col = stale ? 'var(--bad)' : running ? 'var(--good)' : 'var(--warn)';
+    }
+    else if (mode === 'live')  { txt = `status: LIVE - subject ${subject}` + (running ? '' : ' (display paused)'); col = running ? 'var(--good)' : 'var(--warn)'; }
     else if (!sb)         { txt = 'status: backend not configured'; col = 'var(--bad)'; }
     else if (!user)       { txt = 'status: logged out - live data is private'; col = 'var(--dim)'; }
     else if (watching)    { txt = `status: waiting for ${watching}...`; col = 'var(--warn)'; }
     else                  { txt = 'status: logged in - no live stream'; col = 'var(--dim)'; }
-    $('plotTag').textContent = mode === 'live' ? 'LIVE - ' + subject : 'NO DATA';
-    $('plotTag').style.color = mode === 'live' ? 'var(--good)' : 'var(--dim)';
+    $('plotTag').textContent = mode === 'live' ? 'LIVE - ' + subject : mode === 'usb' ? 'USB - this computer' : 'NO DATA';
+    $('plotTag').style.color = mode !== 'off' ? 'var(--good)' : 'var(--dim)';
     showUser();
     if (s._txt === txt) return;
     s._txt = txt; s.style.color = col; type(s, txt);
@@ -549,6 +601,7 @@
 
   // ---- live rows: [t_ms, emg1..N, IMU1 acc xyz, gyro xyz, IMU2 acc xyz, gyro xyz]
   function onLive(msg, nbytes) {
+    if (mode === 'usb') return;          // the rig on this computer's USB wins over the channel
     if (!msg || msg.v !== 1 || !Array.isArray(msg.rows) || msg.subject !== watching) return;
     const ne = Number(msg.nemg);
     if (!Number.isInteger(ne) || ne < 1 || ne > 12 || msg.rows.length > 500) return;
@@ -564,6 +617,11 @@
     liveInfo = { drops: msg.drops | 0, gaps: msg.gaps | 0, seq: msg.seq | 0, rig: String(msg.rig).slice(0, 8) };
     setStatus(); showSubject();
     if (!running) return;
+    plotRows(ne, msg.rows);
+  }
+  // rows at 100 Hz: [t_ms, emg1..ne, IMU1 acc xyz, gyro xyz, IMU2 acc xyz, gyro xyz]
+  function plotRows(ne, rowsIn) {
+    const msg = { rows: rowsIn };
     // firmware with USE_IMU2 = false (1-IMU rig) streams IMU2 as exact zeros
     const imu2Off = msg.rows.length > 0 && msg.rows.every(r => Array.isArray(r) && r.slice(1 + ne + 6, 1 + ne + 12).every(v => v === 0));
     const c2 = CH[ne + 1];
@@ -637,7 +695,7 @@
   };
 
   function goOffline(reason) {
-    if (mode === 'off') { setStatus(); showSubject(); return; }
+    if (mode !== 'live') { setStatus(); showSubject(); return; }
     mode = 'off'; delay = null; log(`subject ${subject} stopped streaming` + (reason ? ` (${reason})` : ''));
     subject = ''; setChannels(3);
     setStatus(); showSubject();
@@ -646,6 +704,7 @@
   // ---- watch one subject's private channel
   async function watch(sid) {
     if (sid === watching) return;
+    await shareOff('subject changed');
     if (channel) { await sb.removeChannel(channel); channel = null; }
     watching = sid; goOffline(); clearSay(); setStatus();
     if (!sid) return;
@@ -701,8 +760,11 @@
       sb.rpc('close_stale_sessions').then(() => {}, () => {});   // close sessions left open by a crash
       log(`logged in: ${user.email} (${role})`);
       $('loginPanel').hidden = true;
+      $('remotePanel').hidden = false;
       pollSessions();
     } else {
+      await remoteOff(); $('remotePanel').hidden = true;
+      await shareOff('logged out');
       await watch(''); liveList = []; ddSig = '';
     }
     setStatus(); showSubject();
@@ -730,6 +792,83 @@
     });
     setInterval(pollSessions, POLL_MS);
   }
+
+  /* ---------- remote control: private channel ctl:<your user id> -> Nidham Remote on your PC ----------
+     Messages (event 'cmd'): {v:1, id, t, src:'web', a:'key'|'move'|'click'|'scroll', ...}; the database rule
+     (migration 004) lets only this same account join or send. The PC helper checks every message again. */
+  let rch = null, rOk = false;
+  const rId = () => Math.random().toString(36).slice(2, 14);
+  function rState(t, c) { $('remoteSt').textContent = t; $('remoteSt').style.color = c || 'var(--dim)'; $('rPad').classList.toggle('on', rOk); }
+  async function remoteOn() {
+    if (!sb || !user || rch) return;
+    const { data } = await sb.auth.getSession();
+    sb.realtime.setAuth(data.session && data.session.access_token);
+    rState('connecting...');
+    rch = sb.channel('ctl:' + user.id, { config: { private: true, broadcast: { self: false } } })
+      .subscribe((st, err) => {
+        rOk = st === 'SUBSCRIBED';
+        if (rOk) { rState('connected - your PC follows', 'var(--good)'); log('remote: connected'); $('btnRemote').textContent = 'Disconnect'; }
+        else if (st === 'CHANNEL_ERROR') { rState('refused' + (err ? ': ' + err.message : '') + ' (database rule 004 missing?)', 'var(--bad)'); }
+        else if (st === 'CLOSED') rState('off');
+      });
+  }
+  async function remoteOff() {
+    if (rch) { const c = rch; rch = null; rOk = false; try { await sb.removeChannel(c); } catch (e) {} }
+    rState('off'); $('btnRemote').textContent = 'Connect';
+  }
+  function rSend(a, extra) {
+    if (!rch || !rOk) { rState('connect first', 'var(--bad)'); return; }
+    rch.send({ type: 'broadcast', event: 'cmd', payload: Object.assign({ v: 1, id: rId(), t: Date.now(), src: 'web', a }, extra) });
+  }
+  $('btnRemote').onclick = () => rch ? remoteOff() : remoteOn();
+
+  /* ---------- gestures decoded IN THE BROWSER from the USB rig (nidham_decoder.js, checked = the desktop app) ---------- */
+  let gModel = null, gFront = null, gCount = 0;
+  function gSet(t, c) { $('gestSt').textContent = t; $('gestSt').style.color = c || 'var(--dim)'; }
+  function gUse(buf, from) {
+    try {
+      gModel = NidhamDecoder.loadModel(buf); gFront = new NidhamDecoder.Front(gModel);
+      gSet(`model: ${gModel.ncls} gestures, ${gModel.nm} muscles (${from})`, 'var(--good)'); log(`gestures: model loaded (${from})`);
+      try { localStorage.setItem('nidhamModel', btoa(String.fromCharCode(...new Uint8Array(buf)))); } catch (e) {}
+    } catch (e) { gModel = gFront = null; gSet('model: ' + e.message, 'var(--bad)'); }
+  }
+  $('fModel').onchange = async e => { const f = e.target.files[0]; if (f) gUse(await f.arrayBuffer(), f.name); e.target.value = ''; };
+  try { const b = localStorage.getItem('nidhamModel'); if (b) gUse(Uint8Array.from(atob(b), c => c.charCodeAt(0)).buffer, 'saved in this browser'); } catch (e) {}
+  // called for every USB row: 25 columns at 2 kHz (nidham_phd_fw) or 23 at 1 kHz; gyro = cols 7-9, EMG = cols 19-21
+  function gRow(r, fs) {
+    if (!gFront) return;
+    const emg = [r[19], r[20], r[21]], gyro = [r[7], r[8], r[9]];
+    const evs = fs === 2000 ? gFront.push2k(emg, gyro) : gFront.push1k(emg, gyro);
+    for (const ev of evs) {
+      if (ev.k === 0) { $('gestBig').textContent = `? (${ev.why})`; continue; }
+      gCount++;
+      $('gestBig').textContent = `${ev.name}  →  ${ev.key}`;
+      if ($('cbGest').checked) rSend('key', { k: ev.key });
+      log(`gesture ${ev.name} -> key ${ev.key}` + ($('cbGest').checked ? ' (sent to your PC)' : ''));
+    }
+  }
+  document.querySelectorAll('#remotePanel [data-k]').forEach(b => b.onclick = () => rSend('key', { k: b.dataset.k }));
+  document.querySelectorAll('#remotePanel [data-c]').forEach(b => b.onclick = () => rSend('click', { b: b.dataset.c }));
+  document.querySelectorAll('#remotePanel [data-s]').forEach(b => b.onclick = () => rSend('scroll', { n: +b.dataset.s }));
+  // touchpad: drag = relative moves (max 30 per second), short tap = left click
+  (() => {
+    const pad = $('rPad'); let last = null, acc = [0, 0], t0 = 0, moved = 0, timer = null;
+    const SPEED = 1.6;
+    const flush = () => {
+      timer = null;
+      const dx = Math.round(acc[0]), dy = Math.round(acc[1]);
+      if (dx || dy) { rSend('move', { dx: Math.max(-200, Math.min(200, dx)), dy: Math.max(-200, Math.min(200, dy)) }); acc = [acc[0] - dx, acc[1] - dy]; }
+    };
+    pad.addEventListener('pointerdown', e => { pad.setPointerCapture(e.pointerId); last = [e.clientX, e.clientY]; t0 = Date.now(); moved = 0; });
+    pad.addEventListener('pointermove', e => {
+      if (!last) return;
+      const dx = (e.clientX - last[0]) * SPEED, dy = (e.clientY - last[1]) * SPEED;
+      last = [e.clientX, e.clientY]; acc[0] += dx; acc[1] += dy; moved += Math.abs(dx) + Math.abs(dy);
+      if (!timer) timer = setTimeout(flush, 33);
+    });
+    const up = () => { if (!last) return; last = null; if (Date.now() - t0 < 250 && moved < 8) rSend('click', { b: 'left' }); };
+    pad.addEventListener('pointerup', up); pad.addEventListener('pointercancel', () => { last = null; });
+  })();
 
   // ---- drawing
   const cv = $('plot'), ctx = cv.getContext('2d');
@@ -763,7 +902,7 @@
       }
       ctx.fillStyle = col; ctx.fillText(c.name, 6, k * lane + 13);
     });
-    if (mode !== 'live') {
+    if (mode === 'off' || (mode === 'usb' && filled === 0)) {
       ctx.fillStyle = css('--dim'); ctx.textAlign = 'center';
       ctx.font = 'bold 16px ' + css('--font');
       ctx.fillText(placeholder(), W / 2, H / 2 + 5);
@@ -783,11 +922,21 @@
         c.el.style.color = css(c.v); c.lbl.style.color = css(c.v);
       });
       const live = mode === 'live';
+      if (mode === 'usb' && usb) {
+        setStatus();                     // shows 'no data' when the Teensy goes quiet
+        $('drops').textContent = `drops: ${usb.drops} | gaps: ${usb.gaps}`;
+        $('drops').style.color = usb.drops || usb.gaps ? 'var(--bad)' : 'var(--good)';
+        $('drops').title = `drops = samples the Teensy lost since you connected (Teensy total since power-on: ${usb.dropTotal})`;
+        $('diag').textContent = `diag: USB ${usb.fw || 'firmware ?'} | ${usb.fs || '-'} Hz in, shown at 100 Hz | bytes ${usb.bytes} | rows ${usb.rows}` +
+          (share ? ` | shared as ${share.subj}, session ${share.id}, packet ${share.seq}${share.err ? ' | send: ' + share.err : ''}` : ' | not shared');
+      } else {
+      $('drops').title = '';
       $('drops').textContent = live ? `drops: ${liveInfo.drops} | gaps: ${liveInfo.gaps}` : 'drops: - | gaps: -';
       $('drops').style.color = live && (liveInfo.drops || liveInfo.gaps) ? 'var(--bad)' : live ? 'var(--good)' : 'var(--dim)';
       $('diag').textContent = live
         ? `diag: subject ${subject} | delay ${delay === null ? '-' : Math.max(0, delay).toFixed(1) + ' s'} | bytes ${bytes} | rows ${rows} | rig ${liveInfo.rig} | packet ${liveInfo.seq}`
         : `diag: no data | ${user ? 'live subjects: ' + (liveList.join(', ') || 'none') : 'logged out'}`;
+      }
     }
     requestAnimationFrame(frame);
   }
@@ -801,6 +950,185 @@
   }
   $('btnStart').onclick = () => setRun(true);
   $('btnStop').onclick = () => setRun(false);
+
+  /* ---------- USB rig: read the Teensy straight from this page (Web Serial, Chrome / Edge on a computer) ----------
+     nidham_phd_fw 1.x: 25 columns at 2 kHz  t_us, IMU1 acc/mag/gyro, IMU2 acc/mag/gyro, emg1..3, imu1_t_us, imu2_t_us, drop_count
+     older firmware:    23 columns at 1 kHz  (no imu*_t_us). '#' lines = header / stat / gyro bias.
+     Shown (and shared) at 100 Hz like the desktop app's broadcast: EMG = largest swing of each block, IMU = block mean. */
+  const hasSerial = 'serial' in navigator;
+  const SHARE_MS = 250, BEAT_MS = 5000;
+  $('btnUsb').title = hasSerial ? 'Read the Teensy plugged into THIS computer (close the desktop app / MATLAB first)'
+                                : 'needs Chrome or Edge on a computer (Web Serial) - not phones, not Firefox / Safari';
+  $('btnUsb').onclick = () => usb ? usbClose('disconnected') : usbOpen();
+
+  async function usbOpen() {
+    if (!hasSerial) { log('USB: this browser cannot read USB - use Chrome or Edge on a computer'); return; }
+    let port;
+    try { port = await navigator.serial.requestPort({ filters: [{ usbVendorId: 0x16C0 }] }); }   // PJRC (Teensy)
+    catch (e) { log('USB: no Teensy chosen'); return; }
+    try { await port.open({ baudRate: 115200, bufferSize: 1 << 20 }); }
+    catch (e) { log('USB: could not open the Teensy - is the desktop app, MATLAB or the Arduino serial monitor using it? (' + e.message + ')'); return; }
+    if (mode === 'live') goOffline('USB rig connected on this computer');
+    usb = { port, reader: null, closing: false, fw: '', fs: 0, nc: 0, lastT: NaN, gaps: 0, dropBase: null, drops: 0, dropTotal: 0,
+            rows: 0, bytes: 0, carry: '', blk: [], lastRx: Date.now(), gapLogAt: 0 };
+    mode = 'usb'; subject = ''; delay = null; setChannels(3);
+    $('btnUsb').textContent = 'USB: disconnect';
+    try { await port.setSignals({ dataTerminalReady: true }); } catch (e) {}
+    usbWrite('H');                       // ask for the header again (firmware name, rate)
+    log('USB: port open - waiting for the Teensy');
+    setStatus(); showSubject();
+    usb.done = usbRead(usb);
+  }
+
+  async function usbWrite(s) {
+    try { const w = usb.port.writable.getWriter(); await w.write(new TextEncoder().encode(s)); w.releaseLock(); } catch (e) {}
+  }
+
+  async function usbRead(u) {
+    const dec = new TextDecoder();
+    while (u.port.readable && !u.closing) {
+      const reader = u.port.readable.getReader(); u.reader = reader;
+      try {
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          u.bytes += value.length; u.lastRx = Date.now();
+          usbText(u, dec.decode(value, { stream: true }));
+        }
+      } catch (e) {
+        if (!u.closing) log('USB: read problem - ' + e.message);    // e.g. buffer overrun: keep reading
+      } finally { reader.releaseLock(); }
+    }
+    if (!u.closing) usbClose('the Teensy was unplugged or restarted - press USB rig again');
+  }
+
+  function usbText(u, s) {
+    const parts = (u.carry + s).split('\n');
+    u.carry = parts.pop();
+    if (u.carry.length > 4096) u.carry = '';
+    const ok = [];
+    for (let ln of parts) {
+      ln = ln.trim();
+      if (!ln) continue;
+      if (ln[0] === '#') { usbHash(u, ln); continue; }
+      const v = ln.split(',');
+      if (v.length !== 25 && v.length !== 23) continue;
+      const n = v.map(Number);
+      if (n.every(Number.isFinite)) ok.push(n);
+    }
+    if (ok.length) usbRows(u, ok);
+  }
+
+  function usbHash(u, ln) {
+    const ver = ln.match(/^#\s*(\S+)\s+version=(\S+)/);
+    if (ver) {                           // (re)start of the stream: the time jump before it is not lost data
+      const fw = `${ver[1]} ${ver[2]}`, fs = (ln.match(/fs_emg=(\d+)/) || [])[1];
+      if (fw !== u.fw) log(`USB: firmware ${fw}` + (fs ? `, EMG ${fs} Hz` : ''));
+      u.fw = fw; u.lastT = NaN;
+    } else if (/gyro_bias/.test(ln)) log('USB: gyro calibrated (keep the IMU still for ~2 s after the Teensy starts)');
+  }
+
+  function usbRows(u, R) {
+    const nc = R[0].length;
+    if (gFront) { const fsr = nc === 25 ? 2000 : 1000; for (const r of R) if (r.length === nc) gRow(r, fsr); }
+    if (nc !== u.nc) {
+      u.nc = nc; u.fs = nc === 25 ? 2000 : 1000; u.lastT = NaN; u.blk = [];
+      log(`USB: data ${u.fs} Hz (${nc} columns), shown at 100 Hz`);
+    }
+    const per = 1e6 / u.fs, D = u.fs / 100, out = [];
+    for (const r of R) {
+      if (r.length !== nc) continue;
+      const t = r[0];
+      if (isFinite(u.lastT) && t - u.lastT > 2.5 * per) {
+        u.gaps++;
+        if (Date.now() - u.gapLogAt > 2000) { u.gapLogAt = Date.now(); log(`USB: GAP - ~${Math.round((t - u.lastT) / per) - 1} samples missing (Teensy drop_count ${r[nc - 1]})`); }
+      }
+      u.lastT = t;
+      const drop = r[nc - 1];
+      if (u.dropBase === null || drop < u.dropBase) u.dropBase = drop;   // counter restarts with the Teensy
+      u.dropTotal = drop; u.drops = drop - u.dropBase;
+      u.rows++;
+      u.blk.push(r);
+      if (u.blk.length >= D) { out.push(usbBlock(u.blk)); u.blk = []; }
+    }
+    if (!out.length) return;
+    if (running) plotRows(3, out);
+    if (share) share.rows.push(...out);
+  }
+
+  // D raw rows -> one 100 Hz row [t_ms, emg1..3, IMU1 acc xyz, gyro xyz, IMU2 acc xyz, gyro xyz]
+  const IMU_IDX = [1, 2, 3, 7, 8, 9, 10, 11, 12, 16, 17, 18], EMG_IDX = [19, 20, 21];
+  function usbBlock(B) {
+    const k = B.length, row = [Math.round(B[0][0] / 1000)];
+    for (const j of EMG_IDX) {
+      let m = 0; for (const r of B) m += r[j]; m /= k;
+      let best = B[0][j], bd = -1;
+      for (const r of B) { const d = Math.abs(r[j] - m); if (d > bd) { bd = d; best = r[j]; } }
+      row.push(Math.round(best));
+    }
+    IMU_IDX.forEach((j, i) => {
+      let m = 0; for (const r of B) m += r[j]; m /= k;
+      row.push(Math.round(m * (i % 6 < 3 ? 1e3 : 1e4)) / (i % 6 < 3 ? 1e3 : 1e4));
+    });
+    return row;
+  }
+
+  async function usbClose(why) {
+    const u = usb;
+    if (!u) return;
+    u.closing = true; usb = null;
+    await shareOff('USB rig disconnected');
+    try { if (u.reader) await u.reader.cancel(); } catch (e) {}
+    try { await u.done; } catch (e) {}
+    try { await u.port.close(); } catch (e) {}
+    mode = 'off'; setChannels(3);
+    $('btnUsb').textContent = 'USB rig';
+    log('USB: ' + why);
+    setStatus(); showSubject();
+  }
+  if (hasSerial) navigator.serial.addEventListener('disconnect', e => { if (usb && e.target === usb.port) usbClose('the Teensy was unplugged'); });
+  addEventListener('beforeunload', () => {
+    if (share && sb) sb.from('sessions').update({ ended_at: new Date().toISOString() }).eq('id', share.id).then(() => {}, () => {});
+  });
+
+  /* ---------- share the USB stream on the subject's private channel (same messages as the desktop app's broadcast) ---------- */
+  $('cbShare').onchange = e => e.target.checked ? shareOn() : shareOff('stopped');
+  async function shareOn() {
+    const cb = $('cbShare');
+    if (!usb || !user || !sb) { cb.checked = false; return; }
+    const sid = watching;
+    if (!sid || !channel) { cb.checked = false; log("share: pick a subject in the top bar first"); return; }
+    const { data, error } = await sb.from('sessions').insert({ subject_id: sid, source: 'web', rig: '3emg', started_by: user.id }).select('id').single();
+    if (error) { cb.checked = false; log('share: could not start a session - ' + error.message); return; }
+    share = { subj: sid, id: data.id, seq: 0, rows: [], err: '', busy: false };
+    share.tSend = setInterval(shareSend, SHARE_MS);
+    share.tBeat = setInterval(() => sb.from('sessions').update({ last_seen: new Date().toISOString() }).eq('id', share.id)
+      .then(({ error }) => { if (error) log('share: heartbeat failed - ' + error.message); }), BEAT_MS);
+    log(`share: ON - USB stream sent to live:${sid} (session ${data.id})`);
+    setStatus(); showSubject();
+  }
+  async function shareSend() {
+    const s = share;
+    if (!s || s.busy || !s.rows.length || !usb || !channel) return;
+    const rows = s.rows.splice(0, 400);
+    s.seq++; s.busy = true;
+    const payload = { v: 1, state: 'streaming', subject: s.subj, rig: '3emg', nemg: 3, fs: 100, seq: s.seq,
+                      drops: usb.drops, gaps: usb.gaps, wall_ms: Date.now(), rows };
+    try {
+      const r = await channel.send({ type: 'broadcast', event: 'rows', payload });
+      s.err = r === 'ok' ? '' : String(r);
+    } catch (e) { s.err = e.message; }
+    s.busy = false;
+  }
+  async function shareOff(why) {
+    const s = share;
+    if (!s) return;
+    share = null; $('cbShare').checked = false;
+    clearInterval(s.tSend); clearInterval(s.tBeat);
+    try { await sb.from('sessions').update({ ended_at: new Date().toISOString() }).eq('id', s.id); } catch (e) {}
+    log(`share: OFF (${why})`);
+    setStatus(); showSubject();
+  }
 })();
 </script>
 </body>

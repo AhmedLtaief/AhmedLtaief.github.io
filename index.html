@@ -158,6 +158,31 @@
     a { color: var(--accent); }
     .one-col { grid-template-columns: minmax(0, 1fr); gap: 8px; }
 
+    /* Conversation tab: captions are white on black (or black on white) whatever the theme, for contrast */
+    .capbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+    .capbar label { display: flex; align-items: center; gap: 6px; }
+    .capfs { display: inline-flex; gap: 2px; }
+    .capnote { font-size: 12px; margin-top: 6px; }
+    #capLangNote { color: var(--warn); }
+    .capprog { height: 14px; margin-top: 6px; border: 1px solid var(--border); background: var(--field); }
+    .capprog[hidden] { display: none; }
+    .capprog i { display: block; height: 100%; width: 0; background: var(--accent); }
+    .capmeter { height: 4px; background: var(--grid); margin-top: 6px; }
+    .capmeter i { display: block; height: 100%; width: 0; background: var(--dim); transition: width .1s; }
+    .capmeter i.on { background: var(--good); }
+    .caps { --capfs: 40px; background: #000; color: #fff; border: 1px solid var(--border); margin-top: 6px; padding: 10px 14px;
+            min-height: 220px; max-height: 60vh; overflow-y: auto; display: flex; flex-direction: column; justify-content: flex-end;
+            font-family: system-ui, "Segoe UI", Arial, "Noto Naskh Arabic", sans-serif; }
+    :root[data-theme="default"] .caps { background: #fff; color: #000; }
+    .caps ol { list-style: none; margin: 0; padding: 0; }
+    .caps li { font-size: calc(var(--capfs) * .55); line-height: 1.25; opacity: .7; padding: 2px 0; }
+    .caps li:nth-last-child(1) { opacity: .85; }
+    .capnow { font-size: var(--capfs); font-weight: bold; line-height: 1.2; padding-top: 4px; word-break: break-word; }
+    .capnow.waiting { font-size: calc(var(--capfs) * .5); font-weight: normal; opacity: .6; }
+    .caporig { font-size: calc(var(--capfs) * .45); line-height: 1.25; color: #9a9a9a; }
+    .caporig:empty { display: none; }
+    .cappart { font-size: calc(var(--capfs) * .7); line-height: 1.2; color: #9a9a9a; font-style: italic; min-height: 1.2em; }
+
     @media (max-width: 860px) {
       .two-col { grid-template-columns: minmax(0, 1fr); }
       .cards { grid-template-columns: 1fr; }
@@ -183,6 +208,7 @@
     <div class="connbar">
       <select id="ddPage" aria-label="Page">
         <option value="about">about</option>
+        <option value="conversation">conversation</option>
         <option value="projects">projects</option>
         <option value="contact">contact</option>
       </select>
@@ -223,6 +249,7 @@
   <!-- tabs -->
   <div class="tabs" role="tablist">
     <button class="tab" role="tab" id="tab-about" aria-controls="about" aria-selected="true">  About  </button>
+    <button class="tab" role="tab" id="tab-conversation" aria-controls="conversation" aria-selected="false" tabindex="-1">  Conversation  </button>
     <button class="tab" role="tab" id="tab-projects" aria-controls="projects" aria-selected="false" tabindex="-1">  Projects  </button>
     <button class="tab" role="tab" id="tab-contact" aria-controls="contact" aria-selected="false" tabindex="-1">  Contact  </button>
   </div>
@@ -316,6 +343,45 @@
     <div class="log wide" id="log" aria-label="Log"></div>
   </section>
 
+  <!-- ================= Conversation: hearing person -> captions, deaf person -> rig ================= -->
+  <section class="pane one-col" id="conversation" role="tabpanel" aria-labelledby="tab-conversation">
+    <fieldset class="panel">
+      <legend>They speak - live captions <span id="capTag" style="color:var(--dim)">off</span></legend>
+      <div class="capbar">
+        <label class="muted">they speak
+          <select id="capLang" aria-label="Language the speaker speaks"></select></label>
+        <label class="muted">I read in
+          <select id="capRead" aria-label="Language I want to read"></select></label>
+        <label class="muted">model
+          <select id="capModel" aria-label="Whisper model"></select></label>
+        <button type="button" id="capGo">Start listening</button>
+        <button type="button" id="capPause" disabled>Pause mic</button>
+        <span class="capfs"><button type="button" id="capSmaller" aria-label="Smaller text">A-</button><button type="button" id="capBigger" aria-label="Bigger text">A+</button></span>
+        <label id="capVibLbl"><input type="checkbox" id="capVib" checked> vibrate on new line</label>
+        <button type="button" id="capClear">Clear</button>
+      </div>
+      <div class="muted capnote" id="capSize">checking model size...</div>
+      <div class="capnote" id="capLangNote" hidden></div>
+      <div class="muted capnote" id="capMt" hidden><span id="capMtTxt"></span> <button type="button" id="capMtGo" hidden>Download translation</button></div>
+      <div class="capprog" id="capProg" hidden role="progressbar" aria-label="Model download" aria-valuemin="0" aria-valuemax="100"><i id="capProgBar"></i></div>
+      <div class="capmeter" aria-hidden="true"><i id="capLevel"></i></div>
+      <div class="caps" id="caps" aria-live="polite">
+        <ol id="capHist" aria-label="Earlier lines"></ol>
+        <div class="capnow" id="capNow" dir="auto">press Start listening, then let the other person talk</div>
+        <div class="caporig" id="capOrig" dir="auto"></div>
+        <div class="cappart" id="capPart" dir="auto"></div>
+      </div>
+      <div class="muted capnote" id="capStat">Speech is turned into text by Whisper inside this browser. The sound never leaves this device.</div>
+    </fieldset>
+    <fieldset class="panel">
+      <legend>I answer - from the rig <span id="convTag" style="color:var(--dim)">waiting</span></legend>
+      <div class="big said waiting" id="convBig" dir="auto">no gesture yet</div>
+      <div class="sub" id="convSub">log in and pick a subject (gestures from the desktop app), or plug the USB rig in and load a model (About tab)</div>
+      <ol class="sayhist" id="convHist" aria-label="Earlier answers"></ol>
+      <div class="sayopt muted"><span>read aloud: tick it in the About tab (Gestured text)</span></div>
+    </fieldset>
+  </section>
+
   <!-- ================= Projects ================= -->
   <section class="pane one-col" id="projects" role="tabpanel" aria-labelledby="tab-projects">
     <fieldset class="panel">
@@ -392,6 +458,7 @@
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.2/dist/umd/supabase.min.js"></script>
 <script src="nidham_decoder.js"></script>
+<script src="nidham_captions.js?v=5"></script>
 <script>
 (() => {
   const $ = id => document.getElementById(id);
@@ -458,7 +525,7 @@
   });
   $('ddPage').onchange = e => show(e.target.value);
   const startTab = location.hash.slice(1);
-  if (['about','projects','contact'].includes(startTab)) show(startTab);
+  if (['about','conversation','projects','contact'].includes(startTab)) show(startTab);
 
   document.querySelectorAll('[data-goto]').forEach(b => b.onclick = () =>
     $(b.dataset.goto).scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' }));
@@ -665,6 +732,7 @@
     $('sayTag').textContent = msg.subject; $('sayTag').style.color = 'var(--good)';
     showSayHist();
     log(`${msg.subject}: "${text}" (${gestureLabel(msg.gesture)})`);
+    convSaid(text, `${gestureLabel(msg.gesture)} - ${msg.subject}`, t);
     if ($('cbSpeak').checked && 'speechSynthesis' in window) {
       speechSynthesis.cancel(); speechSynthesis.speak(new SpeechSynthesisUtterance(text));
     }
@@ -843,6 +911,7 @@
       if (ev.k === 0) { $('gestBig').textContent = `? (${ev.why})`; continue; }
       gCount++;
       $('gestBig').textContent = `${ev.name}  →  ${ev.key}`;
+      convSaid(ev.name, 'USB rig gesture', new Date());
       if ($('cbGest').checked) rSend('key', { k: ev.key });
       log(`gesture ${ev.name} -> key ${ev.key}` + ($('cbGest').checked ? ' (sent to your PC)' : ''));
     }
@@ -881,6 +950,7 @@
 
   function draw() {
     const W = cv.clientWidth, H = cv.clientHeight, lane = H / CH.length;
+    if (W < 1 || H < 1) return;          // plot hidden (another tab): W = 0 would make the grid loop below endless
     ctx.fillStyle = css('--plotbg'); ctx.fillRect(0, 0, W, H);
     ctx.strokeStyle = css('--grid'); ctx.lineWidth = 1; ctx.globalAlpha = theme === 'hacker' ? 0.5 : 1;
     ctx.beginPath();
@@ -1129,6 +1199,196 @@
     log(`share: OFF (${why})`);
     setStatus(); showSubject();
   }
+
+  /* ---------- Conversation tab ----------
+     bottom: what the deaf user says with the rig (same sentences as Gestured text / USB gestures)
+     top: live captions of the microphone, Whisper in this browser (nidham_captions.js) */
+  let conv = [];
+  function convSaid(text, how, t) {
+    conv.unshift({ t: hms(t), text, how }); conv = conv.slice(0, 8);
+    const b = $('convBig');
+    b.classList.remove('waiting', 'flash'); b.classList.toggle('long', text.length > 24);
+    void b.offsetWidth; b.classList.add('flash');
+    b.textContent = text;
+    $('convSub').textContent = `${how} - ${hms(t)}`;
+    $('convTag').textContent = 'live'; $('convTag').style.color = 'var(--good)';
+    const ol = $('convHist'); ol.innerHTML = '';
+    for (const s of conv.slice(1)) {
+      const li = document.createElement('li'), a = document.createElement('span'), c = document.createElement('span');
+      a.className = 't'; a.textContent = s.t; c.textContent = s.text; c.dir = 'auto'; li.append(a, c); ol.appendChild(li);
+    }
+  }
+
+  (() => {
+    const C = window.NidhamCaptions, CAP_KEEP = 6;
+    if (!C) { $('capSize').textContent = 'nidham_captions.js did not load'; $('capGo').disabled = true; return; }
+    const pref = (k, d) => { try { return localStorage.getItem(k) || d; } catch (e) { return d; } };
+    const save = (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} };
+    C.LANGS.forEach(l => $('capLang').add(new Option(l.label, l.code)));
+    C.READ.forEach(l => $('capRead').add(new Option(l.label, l.code)));
+    $('capRead').value = pref('capRead', 'same'); C.setTarget($('capRead').value);
+    C.MODELS.forEach(m => $('capModel').add(new Option(m.label, m.id)));
+    $('capLang').value = pref('capLang', 'en'); $('capModel').value = pref('capModel', 'base');
+    let fs = +pref('capFs', 40); const setFs = v => { fs = Math.max(20, Math.min(96, v)); $('caps').style.setProperty('--capfs', fs + 'px'); save('capFs', fs); };
+    setFs(fs);
+    $('capSmaller').onclick = () => setFs(fs - 6); $('capBigger').onclick = () => setFs(fs + 6);
+    $('capVibLbl').hidden = !('vibrate' in navigator);    // phones (Android); not iPhone, not computers
+    if (!C.supported()) { $('capSize').textContent = 'this browser cannot do live captions (needs a recent Chrome, Edge, Firefox or Safari)'; $('capGo').disabled = true; return; }
+
+    let planned = null, mtPlan = null, lines = [], listening = false, nLines = 0, sumLag = 0, sumMs = 0, sumSec = 0;
+    const lang = () => C.LANGS.find(l => l.code === $('capLang').value);
+    const reader = () => C.READ.find(l => l.code === $('capRead').value);
+    const online = () => $('capModel').value === 'online';
+    // online mode: speech pieces go to the Edge Function 'captions' as the logged-in user
+    C.setCloud({ url: SUPABASE_URL + '/functions/v1/captions', key: SUPABASE_ANON_KEY,
+                 token: async () => { if (!sb) return ''; const { data } = await sb.auth.getSession(); return data.session ? data.session.access_token : ''; } });
+    function showLangNote() {
+      const n = online() ? (lang().code === 'aeb' ? 'Online mode understands Tunisian darija much better than Whisper.' : '')
+        : [lang().note, C.route(lang().code, reader().code).length ? reader().note : ''].filter(Boolean).join(' ');
+      $('capLangNote').hidden = !n; $('capLangNote').textContent = n;
+    }
+    async function showMt() {                            // translation: size before download, or ready
+      const from = lang().code, to = reader().code, need = !online() && C.route(from, to).length > 0;
+      $('capMt').hidden = !need; $('capMtGo').hidden = true; mtPlan = null;
+      if (!need) { goLabel(); return; }
+      const p = await C.planMt(from, to);
+      if (from !== lang().code || to !== reader().code) return;   // changed meanwhile
+      mtPlan = p;
+      const via = p.viaEnglish ? ` (${lang().label} -> English -> ${reader().label}: no direct model, 2 steps, slower and less exact)` : '';
+      $('capMtTxt').textContent = p.ready ? `translation ready${via}`
+        : p.cached ? `translation is already on this device${via}`
+        : `translation needs a download: ${p.mb} MB, once${via}.`;
+      $('capMtGo').hidden = p.ready || p.cached || !listening;
+      $('capMtGo').textContent = `Download translation (${p.mb} MB)`;
+      goLabel();
+    }
+    async function ensureMt() {
+      const from = lang().code, to = reader().code;
+      if (online() || !C.route(from, to).length) return;
+      const p = await C.planMt(from, to);
+      if (p.ready) return;
+      $('capMtTxt').textContent = p.cached ? 'loading translation...' : 'downloading translation...';
+      const r = await C.loadMt(from, to);
+      $('capProg').hidden = true;
+      log(`captions: translation ${lang().label} -> ${reader().label} ready in ${(r.ms / 1000).toFixed(1)} s`);
+      await showMt();
+    }
+    async function showPlan() {
+      const m = $('capModel').value;
+      $('capStat').textContent = m === 'online' ? 'Online: each sentence is sent to the Nidham server.' : 'Speech is turned into text by Whisper inside this browser. The sound never leaves this device.';
+      if (m === 'online') {
+        planned = null;
+        const { data } = sb ? await sb.auth.getSession() : { data: {} };
+        $('capSize').textContent = 'Online: nothing to download. Each sentence is sent to the Nidham server, then to a speech service (OpenAI) and to Claude (Anthropic) for the meaning and translation. Needs internet; costs money per minute.' +
+          (data && data.session ? '' : ' You must log in first (top right).');
+        goLabel(); return;
+      }
+      if (C.ready && C.model === m) { planned = null; $('capSize').textContent = `whisper-${m} ready on ${C.device === 'webgpu' ? 'the GPU' : 'the CPU'}`; goLabel(); return; }
+      $('capSize').textContent = 'checking model size...';
+      planned = await C.plan(m);
+      $('capSize').textContent = planned.cached
+        ? `whisper-${m} is already on this device - no download (${planned.device === 'webgpu' ? 'GPU' : 'CPU'})`
+        : `first use downloads whisper-${m}: ${planned.mb} MB + about ${planned.runtimeMb} MB of program, once. Then it is kept in this browser. ` +
+          (planned.device === 'webgpu' ? 'Runs on the GPU (WebGPU).' : 'No WebGPU here: runs on the CPU, slower.');
+      if (planned.warn) $('capSize').textContent += ' ' + planned.warn;
+      goLabel();
+    }
+    function goLabel() {
+      const g = $('capGo');
+      if (listening) { g.textContent = 'Stop listening'; return; }
+      const mb = (C.ready && C.model === $('capModel').value || !planned || planned.cached ? 0 : planned.mb + planned.runtimeMb)
+               + (mtPlan && !mtPlan.ready && !mtPlan.cached ? mtPlan.mb : 0);
+      g.textContent = mb ? `Download ${mb} MB + start` : 'Start listening';
+    }
+    function tag(t, c) { $('capTag').textContent = t; $('capTag').style.color = c || 'var(--dim)'; }
+
+    // with translation: the reader's language big, what was really said small and grey under it
+    const shown = l => l.tr || (l.wait ? l.text + '  …' : l.text);
+    function render() {
+      const ol = $('capHist'); ol.innerHTML = '';
+      lines.slice(0, -1).slice(-CAP_KEEP).forEach(l => { const li = document.createElement('li'); li.dir = 'auto'; li.textContent = shown(l); if (l.tr) li.title = l.text; ol.appendChild(li); });
+      const now = $('capNow'), last = lines[lines.length - 1];
+      now.classList.toggle('waiting', !last);
+      if (last) now.textContent = shown(last);
+      $('capOrig').textContent = last && (last.tr || last.wait) ? (last.wait && !last.tr ? 'translating...' : 'said: ' + last.text) : '';
+      $('caps').scrollTop = 1e9;
+    }
+
+    C.on(ev => {
+      if (ev.type === 'progress') {
+        const mt = ev.what === 'translation', want = mt ? (mtPlan && mtPlan.mb) : (planned && planned.mb + planned.runtimeMb);
+        const pct = want ? Math.min(100, ev.loaded / 1e4 / want) : (ev.pct || 0);   // the library's own total is too big
+        $('capProg').hidden = false; $('capProgBar').style.width = pct + '%'; $('capProg').setAttribute('aria-valuenow', Math.round(pct));
+        $(mt ? 'capMtTxt' : 'capSize').textContent = `downloading ${mt ? 'translation' : 'whisper'}: ${(ev.loaded / 1e6).toFixed(0)} MB` + (want ? ` of about ${want} MB` : ''); }
+      else if (ev.type === 'state') {
+        if (ev.state === 'loading') tag('loading ' + ev.msg, 'var(--warn)');
+        else if (ev.state === 'listening') tag('listening - ' + lang().label, 'var(--good)');
+        else if (ev.state === 'paused') tag('mic paused', 'var(--warn)');
+        else if (ev.state === 'error') tag('error', 'var(--bad)');
+        else tag(ev.state === 'ready' ? 'ready' : 'off');
+        if (ev.msg && ev.state !== 'loading') log('captions: ' + ev.msg);
+      }
+      else if (ev.type === 'level') {
+        const i = $('capLevel'); i.style.width = Math.min(100, Math.sqrt(ev.rms) * 300) + '%'; i.classList.toggle('on', ev.speaking);
+      }
+      else if (ev.type === 'partial') $('capPart').textContent = ev.text;
+      else if (ev.type === 'line') {
+        lines.push({ id: ev.id, text: ev.text, tr: '', wait: ev.translating }); if (lines.length > 50) lines.shift();
+        render();
+        if ($('capVib').checked && navigator.vibrate) navigator.vibrate(60);
+        nLines++; sumLag += ev.lag; sumMs += ev.ms; sumSec += ev.sec;
+        $('capStat').textContent = `last line: ${ev.sec} s of speech read in ${(ev.ms / 1000).toFixed(1)} s, on screen ${(ev.lag / 1000).toFixed(1)} s after the last word` +
+          ` | average over ${nLines}: ${(sumLag / nLines / 1000).toFixed(1)} s | ${C.model === 'online' ? 'online' : (C.device === 'webgpu' ? 'GPU' : 'CPU') + ', whisper-' + C.model}`;
+      }
+      else if (ev.type === 'translated') {
+        const l = lines.find(x => x.id === ev.id); if (!l) return;
+        l.wait = false; l.tr = ev.text || '';
+        if (ev.error) log('captions: translation failed - ' + ev.error);
+        render();
+        if (!ev.error) $('capStat').textContent = $('capStat').textContent.replace(/ \| translated.*$/, '') + ` | translated in ${(ev.ms / 1000).toFixed(1)} s, on screen ${(ev.lag / 1000).toFixed(1)} s after the last word`;
+      }
+      else if (ev.type === 'info') log('captions: ' + ev.msg);
+    });
+
+    $('capGo').onclick = async () => {
+      const g = $('capGo');
+      if (listening) { C.stop(); listening = false; $('capPause').disabled = true; $('capPause').textContent = 'Pause mic'; $('capPart').textContent = ''; goLabel(); log('captions: stopped'); return; }
+      g.disabled = true;
+      try {
+        const m = $('capModel').value;
+        if (!(C.ready && C.model === m)) {
+          const r = await C.load(m);
+          $('capProg').hidden = true;
+          log(m === 'online' ? 'captions: online mode' : `captions: whisper-${m} ready on ${r.device} in ${(r.ms / 1000).toFixed(1)} s`);
+          await showPlan();
+        }
+        await ensureMt();
+        const err = await C.start($('capLang').value);
+        if (err) { $('capStat').textContent = err + ' - allow the microphone for this site and try again'; return; }
+        listening = true; $('capPause').disabled = false;
+        log(`captions: listening (${lang().label})`);
+      } catch (e) { $('capProg').hidden = true; $('capSize').textContent = 'could not load: ' + e.message; showMt(); }
+      finally { g.disabled = false; goLabel(); }
+    };
+    $('capPause').onclick = () => {
+      if (C.state === 'paused') { C.resume(); $('capPause').textContent = 'Pause mic'; }
+      else { C.pause(); $('capPause').textContent = 'Resume mic'; $('capPart').textContent = ''; }
+    };
+    $('capLang').onchange = () => { save('capLang', $('capLang').value); C.setLang($('capLang').value); showLangNote(); showMt(); if (listening) tag('listening - ' + lang().label, 'var(--good)'); };
+    $('capRead').onchange = () => { save('capRead', $('capRead').value); C.setTarget($('capRead').value); showLangNote(); showMt(); };
+    $('capMtGo').onclick = async () => {               // reader changed while listening: download only after this click
+      $('capMtGo').disabled = true;
+      try { await ensureMt(); } catch (e) { $('capProg').hidden = true; $('capMtTxt').textContent = 'could not load translation: ' + e.message; }
+      finally { $('capMtGo').disabled = false; }
+    };
+    $('capModel').onchange = () => {
+      save('capModel', $('capModel').value);
+      if (listening) { C.stop(); listening = false; $('capPause').disabled = true; log('captions: model changed - press Start again'); }
+      showPlan(); showMt(); showLangNote();
+    };
+    $('capClear').onclick = () => { lines = []; render(); $('capNow').textContent = 'cleared'; $('capPart').textContent = ''; };
+    showLangNote(); showPlan(); showMt();
+  })();
 })();
 </script>
 </body>

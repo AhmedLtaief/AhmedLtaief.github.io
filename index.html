@@ -85,10 +85,17 @@
     fieldset.panel > legend + * { clear: both; }
     /* remote control pad (sends to the Nidham Remote helper on your PC) */
     .rkeys { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin: 6px 0; }
-    .rkeys button { padding: 10px 0; }
+    .rkeys button { padding: 10px 0; height: auto; }
     .rpad { height: 170px; border: 1px dashed var(--dim); border-radius: 6px; touch-action: none; user-select: none;
             display: flex; align-items: center; justify-content: center; color: var(--dim); font-size: 12px; margin: 6px 0; }
     .rpad.on { border-style: solid; }
+    .modetabs { display: flex; gap: 4px; flex-wrap: wrap; margin: 6px 0 2px; }
+    .mtab { padding: 6px 14px; }
+    .mtab[aria-selected="true"] { font-weight: bold; border-color: var(--accent, #1f5fa8); }
+    .rkeys.pres { grid-template-columns: repeat(2, 1fr); }
+    .rkeys.pres button { padding: 16px 4px; font-size: 16px; line-height: 1.2; height: auto; }
+    .soon { text-align: center; }
+    .soonbig { font-size: 28px; font-weight: bold; color: var(--dim); margin: 24px 0 6px; }
 
     .two-col { grid-template-columns: 330px minmax(0, 1fr); gap: 8px; }   /* minmax: the canvas must not widen the column */
     .col { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
@@ -209,6 +216,7 @@
       <select id="ddPage" aria-label="Page">
         <option value="about">about</option>
         <option value="conversation">conversation</option>
+        <option value="mode">mode</option>
         <option value="projects">projects</option>
         <option value="contact">contact</option>
       </select>
@@ -250,6 +258,7 @@
   <div class="tabs" role="tablist">
     <button class="tab" role="tab" id="tab-about" aria-controls="about" aria-selected="true">  About  </button>
     <button class="tab" role="tab" id="tab-conversation" aria-controls="conversation" aria-selected="false" tabindex="-1">  Conversation  </button>
+    <button class="tab" role="tab" id="tab-mode" aria-controls="mode" aria-selected="false" tabindex="-1">  Mode  </button>
     <button class="tab" role="tab" id="tab-projects" aria-controls="projects" aria-selected="false" tabindex="-1">  Projects  </button>
     <button class="tab" role="tab" id="tab-contact" aria-controls="contact" aria-selected="false" tabindex="-1">  Contact  </button>
   </div>
@@ -312,33 +321,6 @@
         <div class="phase" id="phase" style="color:var(--dim)">LOG IN</div>
         <div class="sub" id="phaseSub">live data is private - log in with your GUI / app account</div>
       </fieldset>
-      <fieldset class="panel" id="remotePanel" hidden>
-        <legend>Remote control - your PC</legend>
-        <div class="sub">Controls any PC where <b>Nidham Remote</b> runs, signed in to this same account. Only your account can reach it.</div>
-        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:6px">
-          <button type="button" id="btnRemote">Connect</button>
-          <span class="status" id="remoteSt" style="color:var(--dim)">off</span>
-        </div>
-        <div class="sub" style="margin-top:8px"><b>Gestures from the USB rig</b> (Chrome / Edge on a computer): plug the rig in,
-          press <b>USB rig</b> at the top, load the model saved by the desktop app (Commands tab &rarr; Save model for the website).</div>
-        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:6px 0">
-          <label class="muted" style="cursor:pointer"><input type="file" id="fModel" accept=".ndm" hidden><span class="btnlike" style="border:1px solid var(--dim);padding:4px 8px;border-radius:4px">Load model</span></label>
-          <label><input type="checkbox" id="cbGest"> send my gestures to my PC</label>
-          <span class="status" id="gestSt" style="color:var(--dim)">no model</span>
-        </div>
-        <div class="big said waiting" id="gestBig" style="font-size:22px">no gesture yet</div>
-        <div class="rpad" id="rPad" aria-label="Touchpad: drag to move the cursor, tap to click">drag = move cursor &middot; tap = click</div>
-        <div class="rkeys">
-          <button type="button" data-k="ESCAPE">Esc</button><button type="button" data-k="UP">&uarr;</button>
-          <button type="button" data-k="BACK_SPACE">&#9003;</button><button type="button" data-k="TAB">Tab</button>
-          <button type="button" data-k="LEFT">&larr;</button><button type="button" data-k="DOWN">&darr;</button>
-          <button type="button" data-k="RIGHT">&rarr;</button><button type="button" data-k="ENTER">Enter</button>
-          <button type="button" data-c="left">L click</button><button type="button" data-c="right">R click</button>
-          <button type="button" data-s="3">scroll &uarr;</button><button type="button" data-s="-3">scroll &darr;</button>
-          <button type="button" data-k="SPACE">Space</button><button type="button" data-k="PAGE_UP">PgUp</button>
-          <button type="button" data-k="PAGE_DOWN">PgDn</button><button type="button" data-k="DELETE">Del</button>
-        </div>
-      </fieldset>
     </div>
     <div class="log wide" id="log" aria-label="Log"></div>
   </section>
@@ -376,10 +358,67 @@
     <fieldset class="panel">
       <legend>I answer - from the rig <span id="convTag" style="color:var(--dim)">waiting</span></legend>
       <div class="big said waiting" id="convBig" dir="auto">no gesture yet</div>
-      <div class="sub" id="convSub">log in and pick a subject (gestures from the desktop app), or plug the USB rig in and load a model (About tab)</div>
+      <div class="sub" id="convSub">log in and pick a subject (gestures from the desktop app), or plug the USB rig in and load a model (Mode tab, Presentation)</div>
       <ol class="sayhist" id="convHist" aria-label="Earlier answers"></ol>
       <div class="sayopt muted"><span>read aloud: tick it in the About tab (Gestured text)</span></div>
     </fieldset>
+  </section>
+
+  <!-- ================= Mode: what the rig controls on your PC (via Nidham Remote) ================= -->
+  <section class="pane one-col" id="mode" role="tabpanel" aria-labelledby="tab-mode">
+    <fieldset class="panel" id="modeLogin">
+      <legend>Mode</legend>
+      <div class="sub">Log in first (top right). Then this page can control a PC where <b>Nidham Remote</b> runs, signed in to the same account.</div>
+    </fieldset>
+    <div id="remotePanel" hidden>
+      <fieldset class="panel">
+        <legend>Your PC</legend>
+        <div class="sub">Controls any PC where <b>Nidham Remote</b> runs, signed in to this same account. Only your account can reach it.</div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:6px">
+          <button type="button" id="btnRemote">Connect</button>
+          <span class="status" id="remoteSt" style="color:var(--dim)">off</span>
+        </div>
+      </fieldset>
+      <div class="modetabs" role="tablist" aria-label="Mode">
+        <button type="button" class="mtab" role="tab" data-m="mMouse" aria-selected="true">Mouse</button>
+        <button type="button" class="mtab" role="tab" data-m="mPres" aria-selected="false">Presentation</button>
+        <button type="button" class="mtab" role="tab" data-m="mCtrl" aria-selected="false">Controller</button>
+        <button type="button" class="mtab" role="tab" data-m="mKeys" aria-selected="false">Keyboard</button>
+      </div>
+      <fieldset class="panel mpage" id="mMouse">
+        <legend>Mouse</legend>
+        <div class="rpad" id="rPad" aria-label="Touchpad: drag to move the cursor, tap to click">drag = move cursor &middot; tap = click</div>
+        <div class="rkeys">
+          <button type="button" data-c="left">L click</button><button type="button" data-c="right">R click</button>
+          <button type="button" data-s="3">scroll &uarr;</button><button type="button" data-s="-3">scroll &darr;</button>
+        </div>
+      </fieldset>
+      <fieldset class="panel mpage" id="mPres" hidden>
+        <legend>Presentation</legend>
+        <div class="sub">Open PowerPoint on your PC and click once on it. Then change the slides from here or with the rig.</div>
+        <div class="rkeys pres">
+          <button type="button" data-k="LEFT">&larr; Previous</button><button type="button" data-k="RIGHT">Next &rarr;</button>
+          <button type="button" data-k="F5">Start show (F5)</button><button type="button" data-k="ESCAPE">End show (Esc)</button>
+        </div>
+        <div class="sub" style="margin-top:8px"><b>With the rig</b> (USB, Chrome / Edge on a computer): plug the rig in, press <b>USB rig</b> at the top,
+          load the model saved by the desktop app (Commands tab &rarr; Save model for the website).</div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:6px 0">
+          <label class="muted" style="cursor:pointer"><input type="file" id="fModel" accept=".ndm" hidden><span class="btnlike" style="border:1px solid var(--dim);padding:4px 8px;border-radius:4px">Load model</span></label>
+          <label><input type="checkbox" id="cbGest"> my gestures change the slides</label>
+          <span class="status" id="gestSt" style="color:var(--dim)">no model</span>
+        </div>
+        <div class="big said waiting" id="gestBig" style="font-size:22px">no gesture yet</div>
+        <div class="muted" style="font-size:12px;margin-top:6px">For a talk, the desktop app is faster and safer (Mode &rarr; Presentation): it works with no internet, over the rig's own Wi-Fi. This page goes through the internet.</div>
+      </fieldset>
+      <fieldset class="panel mpage soon" id="mCtrl" hidden>
+        <legend>Controller</legend>
+        <div class="soonbig">coming soon</div><div class="sub">use the rig as a game controller</div>
+      </fieldset>
+      <fieldset class="panel mpage soon" id="mKeys" hidden>
+        <legend>Keyboard</legend>
+        <div class="soonbig">coming soon</div><div class="sub">type text with the rig</div>
+      </fieldset>
+    </div>
   </section>
 
   <!-- ================= Projects ================= -->
@@ -525,7 +564,7 @@
   });
   $('ddPage').onchange = e => show(e.target.value);
   const startTab = location.hash.slice(1);
-  if (['about','conversation','projects','contact'].includes(startTab)) show(startTab);
+  if (['about','conversation','mode','projects','contact'].includes(startTab)) show(startTab);
 
   document.querySelectorAll('[data-goto]').forEach(b => b.onclick = () =>
     $(b.dataset.goto).scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' }));
@@ -828,10 +867,10 @@
       sb.rpc('close_stale_sessions').then(() => {}, () => {});   // close sessions left open by a crash
       log(`logged in: ${user.email} (${role})`);
       $('loginPanel').hidden = true;
-      $('remotePanel').hidden = false;
+      $('remotePanel').hidden = false; $('modeLogin').hidden = true;
       pollSessions();
     } else {
-      await remoteOff(); $('remotePanel').hidden = true;
+      await remoteOff(); $('remotePanel').hidden = true; $('modeLogin').hidden = false;
       await shareOff('logged out');
       await watch(''); liveList = []; ddSig = '';
     }
@@ -916,6 +955,10 @@
       log(`gesture ${ev.name} -> key ${ev.key}` + ($('cbGest').checked ? ' (sent to your PC)' : ''));
     }
   }
+  document.querySelectorAll('#mode .mtab').forEach(b => b.onclick = () => {
+    document.querySelectorAll('#mode .mtab').forEach(x => { const on = x === b; x.setAttribute('aria-selected', on); $(x.dataset.m).hidden = !on; });
+    log('mode -> ' + b.textContent);
+  });
   document.querySelectorAll('#remotePanel [data-k]').forEach(b => b.onclick = () => rSend('key', { k: b.dataset.k }));
   document.querySelectorAll('#remotePanel [data-c]').forEach(b => b.onclick = () => rSend('click', { b: b.dataset.c }));
   document.querySelectorAll('#remotePanel [data-s]').forEach(b => b.onclick = () => rSend('scroll', { n: +b.dataset.s }));
